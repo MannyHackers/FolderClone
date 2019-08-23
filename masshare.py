@@ -41,7 +41,7 @@ for i in aa:
 	pbar.next()
 pbar.finish()
 
-print('Complete. You can now drop the controller inside the accounts folder for an added SA.')
+print('Complete.')
 hours, rem = divmod((time.time() - stt),3600)
 minutes, sec = divmod(rem,60)
 print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours),int(minutes),sec))
