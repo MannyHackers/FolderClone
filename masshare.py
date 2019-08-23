@@ -29,17 +29,20 @@ credentials = Credentials.from_service_account_file(contrs[0], scopes=[
 ])
 
 drive = googleapiclient.discovery.build("drive", "v3", credentials=credentials)
+batch = drive.new_batch_http_request()
+
 aa = glob.glob('%s/*.json' % acc_dir)
 pbar = progress.bar.Bar("Adding to %s" % did,max=len(aa))
 for i in aa:
 	ce = json.loads(open(i,'r').read())['client_email']
-	drive.permissions().create(fileId=did, supportsAllDrives=True, body={
+	batch.add(drive.permissions().create(fileId=did, supportsAllDrives=True, body={
 		"role": "fileOrganizer",
 		"type": "user",
 		"emailAddress": ce
-	}).execute()
+	}))
 	pbar.next()
 pbar.finish()
+batch.execute()
 
 print('Complete.')
 hours, rem = divmod((time.time() - stt),3600)
