@@ -27,10 +27,10 @@ def ls(parent, searchTerms=""):
     while True:
         try:
             files = []
-            resp = drive[0].files().list(q=f"'{parent}' in parents" + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+            resp = drive[0].files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files += resp["files"]
             while "nextPageToken" in resp:
-                resp = drive[0].files().list(q=f"'{parent}' in parents" + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
+                resp = drive[0].files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
                 files += resp["files"]
             return files
         except Exception as e:
