@@ -1,4 +1,4 @@
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import googleapiclient.discovery, glob, progress.bar, sys, time
 
 stt = time.time()
@@ -15,7 +15,7 @@ try:
 except:
 	sid = input("Shared Drive ID? ").strip()
 
-credentials = ServiceAccountCredentials.from_json_keyfile_name(key, scopes=[
+credentials = Credentials.from_service_account_file(key, scopes=[
 	"https://www.googleapis.com/auth/drive"
 ])
 
@@ -25,16 +25,16 @@ print('Getting permissions...')
 
 tbr = []
 
-rp = drive.permissions().list(fileId=sid,supportsAllDrives=True).execute()['permissions']
-for i in rp:
-	if i['role'] != 'organizer':
-		tbr.append(i['id'])
-
-while "nextPageToken" in rp:
-	rp = drive.permissions().list(fileId=sid,supportsAllDrives=True).execute()['permissions']
-	for i in rp:
+rp = drive.permissions().list(fileId=sid,supportsAllDrives=True).execute()
+cont = True
+while cont:
+	for i in rp['permissions']:
 		if i['role'] != 'organizer':
 			tbr.append(i['id'])
+	if "nextPageToken" in rp:
+		rp = drive.permissions().list(fileId=sid,supportsAllDrives=True,pageToken=rp["nextPageToken"]).execute()
+	else:
+		cont = False
 
 pbar = progress.bar.Bar("Removing accounts",max=len(tbr))
 
