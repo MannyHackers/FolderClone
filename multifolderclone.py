@@ -58,7 +58,7 @@ def _copy_(drive, batch):
     batch_copy.execute()
     threads.release()
 
-def _rcopy_(drives,batchsize,threadcount):
+def _rcopy_(drives,batch_size,threadcount):
     global jobs
     global threads
 
@@ -69,7 +69,7 @@ def _rcopy_(drives,batchsize,threadcount):
 
     print('Copying Files')
     pbar = progressbar.ProgressBar(max_value=len(jobs))
-    final = [jobs[i * batchsize:(i + 1) * batchsize] for i in range((len(jobs) + batchsize - 1) // batchsize )]
+    final = [jobs[i * batch_size:(i + 1) * batch_size] for i in range((len(jobs) + batch_size - 1) // batch_size )]
     files_copied = 0
     for batch in final:
         threads.acquire()
@@ -82,7 +82,7 @@ def _rcopy_(drives,batchsize,threadcount):
             selected_drive = 0
     pbar.finish()
 
-def multifolderclone(source,dest,view='tree',width=2,path='accounts',batchsize=100,threadcount=50):
+def multifolderclone(source,dest,path='accounts',batch_size=100,threadcount=50):
 
     accounts = glob.glob(path + '/*.json')
 
@@ -115,7 +115,7 @@ def multifolderclone(source,dest,view='tree',width=2,path='accounts',batchsize=1
     pbar.finish()
     
     print('Copying files.')
-    _rcopy_(drives,batchsize,threadcount)
+    _rcopy_(drives,batch_size,threadcount)
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
@@ -132,9 +132,7 @@ if __name__ == '__main__':
     multifolderclone(
         args.source_id,
         args.destination_id,
-        args.view,
-        args.width,
         args.path,
-        args.threads,
-        args.batch_size
+        args.batch_size,
+        args.threads
     )
