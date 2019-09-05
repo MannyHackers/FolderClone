@@ -1,37 +1,51 @@
-"""
-USAGE
-python3 masshare.py drive_id project_lower project_upper account_prefix project_prefix
+from google.oauth2.service_account import Credentials
+import googleapiclient.discovery, json, progress.bar, glob, sys, argparse, time
 
-drive_id:
-id of the drive you're sharing to
+stt = time.time()
 
-project_lower:
-lower bounds of project iterator
+parse = argparse.ArgumentParser(description='A tool to add service accounts to a shared drive from a folder containing credential files.')
+parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts folder.')
+parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
+parse.add_argument('--yes','-y',default=False,action='store_true',help='Skips the sanity prompt.')
+parsereq = parse.add_argument_group('required arguments')
+parsereq.add_argument('--drive-id','-d',help='The ID of the Shared Drive.',required=True)
 
-project_upper:
-upper bounds of project iterator
+args = parse.parse_args()
+acc_dir = args.path
+did = args.drive_id
+contrs = glob.glob(args.controller)
 
-account_prefix:
-prefix of account
+try:
+	open(contrs[0],'r')
+	print('Found controllers.')
+except IndexError:
+	print('No controller found.')
+	sys.exit(0)
+if not args.yes:
+	input('Make sure the following email is added to the shared drive as Manager:\n' + json.loads((open(contrs[0],'r').read()))['client_email'])
 
-project_prefix:
-prefix of project
-"""
-
-from oauth2client.service_account import ServiceAccountCredentials
-import googleapiclient.discovery, json, progress.bar, sys
-
-credentials = ServiceAccountCredentials.from_json_keyfile_name("key.json", scopes=[
-    "https://www.googleapis.com/auth/drive"
+credentials = Credentials.from_service_account_file(contrs[0], scopes=[
+	"https://www.googleapis.com/auth/drive"
 ])
 
 drive = googleapiclient.discovery.build("drive", "v3", credentials=credentials)
+batch = drive.new_batch_http_request()
 
-for i in range(sys.argv[2], sys.argv[3]+1):
-    for o in range(1, 101):
-        print(sys.argv[4] + str(o + (100*i) - 100) + "@" + sys.argv[5] + str(i) + ".iam.gserviceaccount.com")
-        drive.permissions().create(fileId=sys.argv[1], supportsAllDrives=True, body={
-            "role": "fileOrganizer",
-            "type": "user",
-            "emailAddress": sys.argv[4] + str(o + (100*i) - 100) + "@" + sys.argv[5] + str(i) + ".iam.gserviceaccount.com"
-        }).execute()
+aa = glob.glob('%s/*.json' % acc_dir)
+pbar = progress.bar.Bar("Readying accounts",max=len(aa))
+for i in aa:
+	ce = json.loads(open(i,'r').read())['client_email']
+	batch.add(drive.permissions().create(fileId=did, supportsAllDrives=True, body={
+		"role": "fileOrganizer",
+		"type": "user",
+		"emailAddress": ce
+	}))
+	pbar.next()
+pbar.finish()
+print('Adding...')
+batch.execute()
+
+print('Complete.')
+hours, rem = divmod((time.time() - stt),3600)
+minutes, sec = divmod(rem,60)
+print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours),int(minutes),sec))

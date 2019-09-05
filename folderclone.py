@@ -56,7 +56,9 @@ def copy(source, dest):
         copied_file = drive.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True).execute()
     except googleapiclient.errors.HttpError as e:
         cred_num += 1
-        credentials = ServiceAccountCredentials.from_json_keyfile_name("accounts/alvro-ccsf-" + str(cred_num) + ".json", scopes=[
+        if cred_num % 100 == 0:
+            cred_num += 1
+        credentials = ServiceAccountCredentials.from_json_keyfile_name("accounts/" + str(cred_num) + ".json", scopes=[
             "https://www.googleapis.com/auth/drive"
         ])
         drive = googleapiclient.discovery.build("drive", "v3", credentials=credentials)
