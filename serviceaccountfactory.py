@@ -2,7 +2,7 @@ from google.oauth2.service_account import Credentials
 import googleapiclient.discovery, base64, json, progressbar, glob, sys, argparse, time
 from os import mkdir
 
-def getProjectDetails(project_input, project_count):
+def get_project_details(project_input, project_count):
 	passed_check = 0
 	project_inputs = project_input.split(' ')
 	
@@ -91,7 +91,7 @@ if __name__ == '__main__':
 	if not args.no_autofill:
 		project_count += 1
 		project_input = json.loads(open(contrs[0],'r').read())['project_id'] + ' 99'
-		project_details = getProjectDetails(project_input, project_count)
+		project_details = get_project_details(project_input, project_count)
 		print(str(project_count) + '. ' + project_details['project_id'] + ' ' + str(project_details['num_sa']))
 		projects.append(project_details)
 	
@@ -99,7 +99,7 @@ if __name__ == '__main__':
 		project_count += 1
 		project_input = input(str(project_count) + '. ')
 		if project_input != '':
-			project_details = getProjectDetails(project_input, project_count)
+			project_details = get_project_details(project_input, project_count)
 			projects.append(project_details)
 
 	while len(prefix) < 4:
