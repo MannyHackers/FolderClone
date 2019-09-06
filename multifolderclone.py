@@ -1,14 +1,21 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2.service_account import Credentials
+from itertools import islice
 import time, glob, sys, argparse, httplib2shim, threading, progressbar
 
 threads = None
 pbar = None
+errd = {}
+jobs = {}
 httplib2shim.patch()
-jobs = []
 
-def _ls_(parent, searchTerms, drive):
+def _chunks(job_dict,size):
+    it = iter(job_dict)
+    for i in range(0,len(job_dict),size):
+        yield {k:job_dict[k] for k in islice(it,size)}
+
+def _ls(parent, searchTerms, drive):
     while True:
         try:
             files = []
@@ -21,69 +28,80 @@ def _ls_(parent, searchTerms, drive):
         except Exception as e:
             time.sleep(3)
 
-def _lsd_(parent, drive):
+def _lsd(parent, drive):
     
-    return _ls_(parent, " and mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, " and mimeType contains 'application/vnd.google-apps.folder'", drive)
 
-def _lsf_(parent, drive):
+def _lsf(parent, drive):
     
-    return _ls_(parent, " and not mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, " and not mimeType contains 'application/vnd.google-apps.folder'", drive)
 
-def _rebuild_dirs_(source, dest, drive):
+def _rebuild_dirs(source, dest, drive):
     global jobs
     global pbar
     
-    folderstocopy = _lsd_(source, drive)
+    for file in _lsf(source,drive):
+        jobs[file['id']] = dest
+        pbar.update()
+        
+    folderstocopy = _lsd(source, drive)
     for i in folderstocopy:
         resp = drive.files().create(body={
             "name": i["name"],
             "mimeType": "application/vnd.google-apps.folder",
             "parents": [dest]
         }, supportsAllDrives=True).execute()
+        _rebuild_dirs(i["id"], resp["id"], drive)
 
-        for file in _lsf_(source,drive):
-            jobs.append({
-                'source': file['id'],
-                'destination': dest
-            })
-        pbar.update()
-        _rebuild_dirs_(i["id"], resp["id"], drive)
+def _batch_response(id,resp,exception):
+    global errd
+    global jobs
+    if exception is not None:
+        fileId = str(exception).split('/')[6]
+        errd[fileId] = jobs[fileId]
 
-def _copy_(drive, batch):
+def _copy(drive, batch):
     global threads
 
     batch_copy = drive.new_batch_http_request()
     for job in batch:
-        batch_copy.add(drive.files().copy(fileId=job['source'], body={"parents": [job['destination']]}, supportsAllDrives=True))
+        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True), callback=_batch_response)
     batch_copy.execute()
     threads.release()
 
-def _rcopy_(drives,batchsize,threadcount):
+def _rcopy(drives,batch_size,thread_count):
     global jobs
     global threads
 
     total_drives = len(drives)
     selected_drive = 0
 
-    threads = threading.BoundedSemaphore(threadcount)
+    final = []
+    for i in _chunks(jobs,batch_size):
+        final.append(i)
 
-    print('Copying Files')
+    threads = threading.BoundedSemaphore(thread_count)
+
     pbar = progressbar.ProgressBar(max_value=len(jobs))
-    final = [jobs[i * batchsize:(i + 1) * batchsize] for i in range((len(jobs) + batchsize - 1) // batchsize )]
     files_copied = 0
     for batch in final:
         threads.acquire()
-        thread = threading.Thread(target=_copy_,args=(drives[selected_drive],batch))
+        thread = threading.Thread(target=_copy,args=(drives[selected_drive],batch))
         thread.start()
         files_copied += len(batch)
         pbar.update(files_copied)
         selected_drive += 1
         if selected_drive == total_drives - 1:
             selected_drive = 0
+    while threading.active_count() != 1:
+        time.sleep(1)
     pbar.finish()
 
-def multifolderclone(source,dest,view='tree',width=2,path='accounts',batchsize=100,threadcount=50):
+def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=50):
+    global jobs
+    global errd
 
+    print(threading.active_count())
     accounts = glob.glob(path + '/*.json')
 
     check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
@@ -93,35 +111,38 @@ def multifolderclone(source,dest,view='tree',width=2,path='accounts',batchsize=1
         print('Source folder cannot be read or is invalid.')
         sys.exit(0)
     try:
-        check.files().get(fileId=dest, supportsAllDrives=True).execute()
+        dest_dir = check.files().get(fileId=dest, supportsAllDrives=True).execute()['name']
     except HttpError:
         print('Destination folder cannot be read or is invalid.')
         sys.exit(0)
 
     drives = []
-    # pbar = ProgressBar("Ceating Drive Services", max=len(accounts))
     print('Creating Drive Services')
     for account in progressbar.progressbar(accounts):
         credentials = Credentials.from_service_account_file(account, scopes=[
             "https://www.googleapis.com/auth/drive"
         ])
         drives.append(build("drive", "v3", credentials=credentials))
-    # pbar.finish()
 
-    print('Rebuilding Folder Hierarchy')
+    print('Rebuilding Folder Hierarchy for %s in %s' % (root_dir,dest_dir))
     global pbar
     pbar = progressbar.ProgressBar(widgets=[progressbar.Timer()]).start()
-    _rebuild_dirs_(source, dest, drives[0])
+    _rebuild_dirs(source, dest, drives[0])
     pbar.finish()
     
-    print('Copying files.')
-    _rcopy_(drives,batchsize,threadcount)
+    print('Copying files from %s to %s' % (root_dir,dest_dir))
+    _rcopy(drives,batch_size,thread_count)
+    while len(errd) > 0:
+        print('Dropped %d files...\nRetrying' % len(errd))
+        jobs = errd
+        errd = {}
+        _rcopy(drives,batch_size,thread_count)
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts.')
-    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use.')
-    parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be.')
+    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
+    parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be. USE AT YOUR OWN RISK.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id','-s',help='The source ID of the folder to copy.',required=True)
     parsereq.add_argument('--destination-id','-d',help='The destination ID of the folder to copy to.',required=True)
@@ -132,9 +153,7 @@ if __name__ == '__main__':
     multifolderclone(
         args.source_id,
         args.destination_id,
-        args.view,
-        args.width,
         args.path,
-        args.threads,
-        args.batch_size
+        args.batch_size,
+        args.threads
     )
