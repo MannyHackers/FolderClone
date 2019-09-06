@@ -43,7 +43,7 @@ def _rebuild_dirs(source, dest, drive):
     for file in _lsf(source,drive):
         jobs[file['id']] = dest
         pbar.update()
-        
+
     folderstocopy = _lsd(source, drive)
     for i in folderstocopy:
         resp = drive.files().create(body={
@@ -69,7 +69,7 @@ def _copy(drive, batch):
     batch_copy.execute()
     threads.release()
 
-def _rcopy(drives,batch_size,thread_count):
+def _rcopy(drives,batch_size,thread_count, selected_drive=0):
     global jobs
     global threads
 
@@ -93,15 +93,16 @@ def _rcopy(drives,batch_size,thread_count):
         selected_drive += 1
         if selected_drive == total_drives - 1:
             selected_drive = 0
+    print('\nFinishing...')
     while threading.active_count() != 1:
         time.sleep(1)
     pbar.finish()
+    return selected_drive + 1
 
-def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=50):
+def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=25):
     global jobs
     global errd
 
-    print(threading.active_count())
     accounts = glob.glob(path + '/*.json')
 
     check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
@@ -131,17 +132,17 @@ def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread
     pbar.finish()
     
     print('Copying files from %s to %s' % (root_dir,dest_dir))
-    _rcopy(drives,batch_size,thread_count)
+    finat = _rcopy(drives,batch_size,thread_count)
     while len(errd) > 0:
         print('Dropped %d files...\nRetrying' % len(errd))
         jobs = errd
         errd = {}
-        _rcopy(drives,batch_size,thread_count)
+        finat = _rcopy(drives,batch_size,thread_count,finat)
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts.')
-    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
+    parse.add_argument('--threads',default=25,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
     parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be. USE AT YOUR OWN RISK.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id','-s',help='The source ID of the folder to copy.',required=True)
