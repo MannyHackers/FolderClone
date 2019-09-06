@@ -125,7 +125,7 @@ if __name__ == '__main__':
 
 	for i in range(len(projects)):
 		print('Creating accounts in ' + projects[i]['project_id'])
-		for o in progressbar.progressbar(range(1, projects[i]['num_sa'])+1):
+		for o in progressbar.progressbar(range(1, projects[i]['num_sa']+1)):
 			create_service_account_and_dump_key(projects[i]['project_id'],prefix + str(o),acc_dir + "/" + str(gc) + '.json')
 			gc += 1
 	
