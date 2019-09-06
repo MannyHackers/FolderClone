@@ -57,7 +57,6 @@ def _batch_response(id,resp,exception):
     global errd
     global jobs
     if exception is not None:
-        print(exception)
         fileId = str(exception).split('/')[6]
         errd[fileId] = jobs[fileId]
 
