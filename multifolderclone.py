@@ -65,9 +65,9 @@ def _batch_response(id,resp,exception):
 def _copy(drive, batch):
     global threads
 
-    batch_copy = drive.new_batch_http_request()
+    batch_copy = drive.new_batch_http_request(callback=_batch_response)
     for job in batch:
-        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True), callback=_batch_response)
+        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True))
     batch_copy.execute()
     threads.release()
 
@@ -144,7 +144,7 @@ def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts.')
-    parse.add_argument('--threads',default=25,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
+    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
     parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be. USE AT YOUR OWN RISK.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id','-s',help='The source ID of the folder to copy.',required=True)
