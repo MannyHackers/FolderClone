@@ -21,10 +21,10 @@ def _ls(parent, searchTerms, drive):
     while True:
         try:
             files = []
-            resp = drive.files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+            resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files += resp["files"]
             while "nextPageToken" in resp:
-                resp = drive.files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
+                resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
                 files += resp["files"]
             return files
         except Exception as e:
@@ -32,11 +32,11 @@ def _ls(parent, searchTerms, drive):
 
 def _lsd(parent, drive):
     
-    return _ls(parent, " and mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, "and mimeType contains 'application/vnd.google-apps.folder'", drive)
 
 def _lsf(parent, drive):
     
-    return _ls(parent, " and not mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, "and not mimeType contains 'application/vnd.google-apps.folder'", drive)
 
 def _rebuild_dirs(source, dest, drive):
     global jobs
