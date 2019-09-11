@@ -1,51 +1,69 @@
 from google.oauth2.service_account import Credentials
-import googleapiclient.discovery, json, progress.bar, glob, sys, argparse, time
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+from os.path import exists
+import json, glob, argparse, pickle
 
-stt = time.time()
+successful = []
 
-parse = argparse.ArgumentParser(description='A tool to add service accounts to a shared drive from a folder containing credential files.')
-parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts folder.')
-parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
-parse.add_argument('--yes','-y',default=False,action='store_true',help='Skips the sanity prompt.')
-parsereq = parse.add_argument_group('required arguments')
-parsereq.add_argument('--drive-id','-d',help='The ID of the Shared Drive.',required=True)
+def _is_success(id,resp,exception):
+    global successful
 
-args = parse.parse_args()
-acc_dir = args.path
-did = args.drive_id
-contrs = glob.glob(args.controller)
+    if exception is None:
+        successful.append(resp['emailAddress'])
 
-try:
-	open(contrs[0],'r')
-	print('Found controllers.')
-except IndexError:
-	print('No controller found.')
-	sys.exit(0)
-if not args.yes:
-	input('Make sure the following email is added to the shared drive as Manager:\n' + json.loads((open(contrs[0],'r').read()))['client_email'])
+def masshare(drive_id=None,path='accounts',token='token.pickle',credentials='credentials.json'):
+    global successful
 
-credentials = Credentials.from_service_account_file(contrs[0], scopes=[
-	"https://www.googleapis.com/auth/drive"
-])
+    SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
+    creds = None
 
-drive = googleapiclient.discovery.build("drive", "v3", credentials=credentials)
-batch = drive.new_batch_http_request()
+    if exists(token):
+        with open(token, 'rb') as t:
+            creds = pickle.load(t)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                credentials, SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open(token, 'wb') as t:
+            pickle.dump(creds, t)
 
-aa = glob.glob('%s/*.json' % acc_dir)
-pbar = progress.bar.Bar("Readying accounts",max=len(aa))
-for i in aa:
-	ce = json.loads(open(i,'r').read())['client_email']
-	batch.add(drive.permissions().create(fileId=did, supportsAllDrives=True, body={
-		"role": "fileOrganizer",
-		"type": "user",
-		"emailAddress": ce
-	}))
-	pbar.next()
-pbar.finish()
-print('Adding...')
-batch.execute()
+    drive = build("drive", "v3", credentials=creds)
 
-print('Complete.')
-hours, rem = divmod((time.time() - stt),3600)
-minutes, sec = divmod(rem,60)
-print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours),int(minutes),sec))
+    accounts_to_add = []
+
+    print('Fetching emails')
+    for i in glob.glob('%s/*.json' % path):
+        accounts_to_add.append(json.loads(open(i,'r').read())['client_email'])
+
+    while len(successful) < len(accounts_to_add):
+        print('Preparing %d members' % (len(accounts_to_add) - len(successful)))
+        batch = drive.new_batch_http_request(callback=_is_success)
+        for i in accounts_to_add:
+            if i not in successful:
+                batch.add(drive.permissions().create(fileId=drive_id, fields='emailAddress', supportsAllDrives=True, body={
+                    "role": "fileOrganizer",
+                    "type": "user",
+                    "emailAddress": i
+                }))
+        print('Adding')
+        batch.execute()
+
+if __name__ == '__main__':
+    parse = argparse.ArgumentParser(description='A tool to add service accounts to a shared drive from a folder containing credential files.')
+    parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts folder.')
+    parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path.')
+    parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
+    parsereq = parse.add_argument_group('required arguments')
+    parsereq.add_argument('--drive-id','-d',help='The ID of the Shared Drive.',required=True)
+    args = parse.parse_args()
+    masshare(
+        drive_id=args.drive_id,
+        path=args.path,
+        token=args.token,
+        credentials=args.credentials
+    )
