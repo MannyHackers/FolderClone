@@ -2,8 +2,10 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2.service_account import Credentials
 from itertools import islice
+import socket
 import time, glob, sys, argparse, httplib2shim, threading, progressbar
 
+socket.setdefaulttimeout(200)
 threads = None
 pbar = None
 errd = {}
@@ -19,10 +21,10 @@ def _ls(parent, searchTerms, drive):
     while True:
         try:
             files = []
-            resp = drive.files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
+            resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
             files += resp["files"]
             while "nextPageToken" in resp:
-                resp = drive.files().list(q="'%s' in parents" % parent + searchTerms, pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
+                resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
                 files += resp["files"]
             return files
         except Exception as e:
@@ -30,11 +32,11 @@ def _ls(parent, searchTerms, drive):
 
 def _lsd(parent, drive):
     
-    return _ls(parent, " and mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, "and mimeType contains 'application/vnd.google-apps.folder'", drive)
 
 def _lsf(parent, drive):
     
-    return _ls(parent, " and not mimeType contains 'application/vnd.google-apps.folder'", drive)
+    return _ls(parent, "and not mimeType contains 'application/vnd.google-apps.folder'", drive)
 
 def _rebuild_dirs(source, dest, drive):
     global jobs
@@ -57,15 +59,15 @@ def _batch_response(id,resp,exception):
     global errd
     global jobs
     if exception is not None:
-        fileId = str(exception).split('/')[6]
-        errd[fileId] = jobs[fileId]
+        noslash = str(exception).split('/')
+        errd[noslash[6]] = jobs[noslash[6]]
 
 def _copy(drive, batch):
     global threads
 
-    batch_copy = drive.new_batch_http_request()
+    batch_copy = drive.new_batch_http_request(callback=_batch_response)
     for job in batch:
-        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True), callback=_batch_response)
+        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True))
     batch_copy.execute()
     threads.release()
 
@@ -93,13 +95,13 @@ def _rcopy(drives,batch_size,thread_count, selected_drive=0):
         selected_drive += 1
         if selected_drive == total_drives - 1:
             selected_drive = 0
+    pbar.finish()
     print('\nFinishing...')
     while threading.active_count() != 1:
         time.sleep(1)
-    pbar.finish()
     return selected_drive + 1
 
-def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=25):
+def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=50):
     global jobs
     global errd
 
@@ -125,13 +127,13 @@ def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread
         ])
         drives.append(build("drive", "v3", credentials=credentials))
 
-    print('Rebuilding Folder Hierarchy for %s in %s' % (root_dir,dest_dir))
+    print('Rebuilding Folder Hierarchy: %s to %s' % (root_dir,dest_dir))
     global pbar
     pbar = progressbar.ProgressBar(widgets=[progressbar.Timer()]).start()
     _rebuild_dirs(source, dest, drives[0])
     pbar.finish()
     
-    print('Copying files from %s to %s' % (root_dir,dest_dir))
+    print('Copying Files: %s to %s' % (root_dir,dest_dir))
     finat = _rcopy(drives,batch_size,thread_count)
     while len(errd) > 0:
         print('Dropped %d files...\nRetrying' % len(errd))
@@ -142,7 +144,7 @@ def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts.')
-    parse.add_argument('--threads',default=25,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
+    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
     parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be. USE AT YOUR OWN RISK.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id','-s',help='The source ID of the folder to copy.',required=True)
