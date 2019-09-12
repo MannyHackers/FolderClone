@@ -85,10 +85,9 @@ def copy(source, dest):
             if accounts == cached_dtu:
                 drive.pop(cached_dtu)
                 accounts -= 1
+                cached_dtu = 1
                 dtu = 1
-                cached_dtu = dtu
             elif accounts != 1:
-                # Removing Quotad Account
                 drive.pop(cached_dtu)
                 accounts -= 1
             else:
