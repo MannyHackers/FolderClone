@@ -57,7 +57,7 @@ def remove(drive_id=None,token='token.pickle',credentials='credentials.json',suf
     while cont:
         all_perms += rp['permissions']
         if "nextPageToken" in rp:
-            rp = drive.permissions().list(fileId=drive_id,pageSize=100,supportsAllDrives=True,pageToken=rp["nextPageToken"]).execute()
+            rp = drive.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True,pageToken=rp["nextPageToken"]).execute()
         else:
             cont = False
 
