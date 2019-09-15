@@ -5,7 +5,7 @@ import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, g
 # GLOBAL VARIABLES
 max_retries = 5
 account_count = 0
-dtu = 0
+dtu = 1
 drive = []
 retryable_requests = []
 unretryable_requests = []
@@ -16,7 +16,7 @@ error_code_reasons = {
     "retryable": {
         403: ['dailyLimitExceeded', 'userRateLimitExceeded', 'rateLimitExceeded', 'sharingRateLimitExceeded', 'appNotAuthorizedToFile', 'insufficientFilePermissions', 'domainPolicy'],
         429: ['rateLimitExceeded'],
-        500: ['backendError']
+        500: ['backendError','internalError']
     },
     "unretryable": {
         400: ['badRequest', 'invalidSharingRequest'],
@@ -30,27 +30,31 @@ httplib2shim.patch()
 class CopyService:
     def increase_request_dtu_and_retry(self):
         if self.dtu + 1 == account_count:
-            self.dtu = 0
+            self.dtu = 1
         else:
             self.dtu += 1
         self.request = drive[self.dtu].files().copy(
             fileId=self.fileId,
             body=self.body,
-            supportsAllDrives=self.supportsAllDrives
+            supportsAllDrives=True
         )
+
         self.response = apicall(self.request)
-    def __init__(self, fileId, body, supportsAllDrives):
+        if self.response == {"drive_quotad": 1}:
+            self.increase_request_dtu_and_retry()
+
+        
+    def __init__(self, fileId, body):
         global dtu
         self.dtu = dtu
         self.fileId = fileId
         self.body = body
-        self.supportsAllDrives = supportsAllDrives
-        self.request = drive[dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=supportsAllDrives)
+        self.request = drive[self.dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=True)
         self.response = apicall(self.request)
 
         if "drive_quotad" in self.response:
             self.increase_request_dtu_and_retry()
-
+        
 def apicall(request):
     global account_count
     global max_retries
@@ -112,24 +116,23 @@ def is_retryable_error(code, reason, request):
 
 # FUNCTION TO HANDLE API CALLING AND ERROR HANDLING OF API CALLS
 
-
 def ls(parent, searchTerms=""):
     files = []
-    resp = apicall(drive[0].files().list(
+    resp = drive[0].files().list(
         q="'%s' in parents" % parent + searchTerms,
         pageSize=1000,
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
-    ))
+    )
     files += resp["files"]
     while "nextPageToken" in resp:
-        files += apicall(drive[0].files().list(
+        files += drive[0].files().list(
             q="'%s' in parents" % parent + searchTerms,
             pageSize=1000,
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageToken=resp["nextPageToken"]
-        ))["files"]
+        )["files"]
     return files
 
 def lsd(parent):
@@ -145,14 +148,12 @@ def lsf(parent):
     )
 
 def copy(source, dest):
-    global dtu
     global drive
     global threads
 
     CopyService(
         fileId=source,
-        body={"parents": [dest]},
-        supportsAllDrives=True
+        body={"parents": [dest]}
     )
 
     threads.release()
@@ -160,7 +161,6 @@ def copy(source, dest):
 def rcopy(source, dest, sname, pre, width):
     global drive
     global account_count
-    global dtu
 
     pres = pre
 
@@ -176,13 +176,7 @@ def rcopy(source, dest, sname, pre, width):
                 dest
             ))
             thread.start()
-            
-            if dtu + 1 == account_count:
-                dtu = 0
-            else:
-                dtu += 1
             pbar.next()
-        
         pbar.finish()
     else:
         print(pres + sname)
