@@ -1,2 +1,4 @@
 accounts/
 controller/
+credentials.json
+token.pickle
