@@ -2,6 +2,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from os import mkdir
 import base64, json, glob, sys, argparse, time, os.path, pickle, requests, random
 
 SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
@@ -112,6 +113,12 @@ for i in projs:
 batch.execute()
 
 sas = 0
+
+try:
+    mkdir(args.path)
+except FileExistsError:
+    pass
+
 for i in projs:
     unique_ids = []
     keys = []
