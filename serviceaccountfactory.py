@@ -144,7 +144,7 @@ def main():
     parse = argparse.ArgumentParser(description='A tool to create Google service accounts.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
     parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
-    parse.add_argument('--no-autofill',default=False,action='store_true',help='Do not autofill the first project.')
+    parse.add_argument('--no-autofill-first',default=False,action='store_true',help='Do not autofill the first project.')
     parse.add_argument('--project-autofill',nargs=2,action='append',metavar=('PROJECT_ID','NO_OF_ACCOUNTS'),required=False,help='Auto add project input to SAF.')
     parse.add_argument('--custom-prefix',default='folderclone',help='Custom Prefix for SAs.')
 
@@ -154,14 +154,14 @@ def main():
         service_account_factory(
             path=args.path,
             controller=args.controller,
-            first_project_no_autofill=args.no_autofill,
+            first_project_no_autofill=args.no_autofill_first,
             project_autofill=args.project_autofill,
             custom_prefix=args.custom_prefix)
     else:
         service_account_factory(
             path=args.path,
             controller=args.controller,
-            first_project_no_autofill=args.no_autofill,
+            first_project_no_autofill=args.no_autofill_first,
             project_autofill=None,
             custom_prefix=args.custom_prefix)
 
