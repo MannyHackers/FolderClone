@@ -27,6 +27,67 @@ error_code_reasons = {
 
 httplib2shim.patch()
 
+class CopyService:
+    def increase_request_dtu_and_retry(self):
+        if self.dtu + 1 == account_count:
+            self.dtu = 0
+        else:
+            self.dtu += 1
+        self.request = drive[self.dtu].files().copy(
+            fileId=self.fileId,
+            body=self.body,
+            supportsAllDrives=self.supportsAllDrives
+        )
+        self.response = apicall(self.request)
+    def __init__(self, fileId, body, supportsAllDrives):
+        global dtu
+        self.dtu = dtu
+        self.fileId = fileId
+        self.body = body
+        self.supportsAllDrives = supportsAllDrives
+        self.request = drive[dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=supportsAllDrives)
+        self.response = apicall(self.request)
+
+        if "drive_quotad" in self.response:
+            self.increase_request_dtu_and_retry()
+
+def apicall(request):
+    global account_count
+    global max_retries
+    global retryable_requests
+    global unretryable_requests
+
+    retry_count = 0
+    sleep_time = 1
+    resp = None
+
+    while True:
+        try:
+            resp = request.execute()
+        except HttpError as error:
+            error_details = json.loads(error.content.decode("utf-8"))
+            code = error_details["error"]["code"]
+            reason = error_details["error"]["errors"][0]["reason"]
+            # message = error_details["error"]["errors"][0]["message"]
+            if code == 403 and reason == 'userRateLimitExceeded':
+                return {"drive_quotad": 1}
+            elif is_retryable_error(code, reason, request):
+                if not retry_count < max_retries:
+                    # TOO MANY RETRY ATTEMPTS, WILL BE RETRIED LATER
+                    retryable_requests.append(request)
+                    break
+                retry_count += 1
+                time.sleep(sleep_time)
+                sleep_time *= 2
+                continue
+            else:
+                unretryable_requests.append(request)
+        except socket.error:
+            time.sleep(3)
+            continue
+        else:
+            return resp
+        break
 # FUNCTION TO CHECK IF ERROR RETURNED IS RETRYABLE OR NOT
 def is_retryable_error(code, reason, request):
     global error_code_reasons
@@ -50,43 +111,7 @@ def is_retryable_error(code, reason, request):
         return False
 
 # FUNCTION TO HANDLE API CALLING AND ERROR HANDLING OF API CALLS
-def apicall(request):
-    global max_retries
-    global retryable_requests
-    global unretryable_requests
 
-    retry_count = 0
-    sleep_time = 1
-    resp = None
-
-    while True:
-        try:
-            resp = request.execute()
-        except HttpError as error:
-            error_details = json.loads(error.content.decode("utf-8"))
-            code = error_details["error"]["code"]
-            reason = error_details["error"]["errors"][0]["reason"]
-            # message = error_details["error"]["errors"][0]["message"]
-            if code == 403 and reason == 'userRateLimitExceeded':
-                # TO-DO
-                pass
-            elif is_retryable_error(code, reason, request):
-                if not retry_count < max_retries:
-                    # TOO MANY RETRY ATTEMPTS, WILL BE RETRIED LATER
-                    retryable_requests.append(request)
-                    break
-                retry_count += 1
-                time.sleep(sleep_time)
-                sleep_time *= 2
-                continue
-            else:
-                unretryable_requests.append(request)
-        except socket.error:
-            time.sleep(3)
-            continue
-        else:
-            return resp
-        break
 
 def ls(parent, searchTerms=""):
     files = []
@@ -95,7 +120,7 @@ def ls(parent, searchTerms=""):
         pageSize=1000,
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
-    ))
+    )).response
     files += resp["files"]
     while "nextPageToken" in resp:
         files += apicall(drive[0].files().list(
@@ -124,11 +149,11 @@ def copy(source, dest):
     global drive
     global threads
 
-    apicall(drive[dtu].files().copy(
+    CopyService(
         fileId=source,
         body={"parents": [dest]},
         supportsAllDrives=True
-    ))
+    )
 
     threads.release()
 
