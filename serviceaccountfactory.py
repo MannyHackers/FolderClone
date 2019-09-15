@@ -1,142 +1,178 @@
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
+from google.oauth2.service_account import Credentials
+import googleapiclient.discovery, base64, json, progressbar, glob, sys, argparse, time, random
 from os import mkdir
-import base64, json, glob, sys, argparse, time, os.path, pickle, requests, random
 
-SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
-proj_id = json.loads(open('credentials.json','r').read())['installed']['project_id']
-failed_create = []
-unique_ids = []
-keys = []
+iam = None
 
-def _create_accounts(service,todo,prefix,project):
-    batch = service.new_batch_http_request(callback=_get_unique_id)
-    for o in todo:
-        batch.add(service.projects().serviceAccounts().create(name="projects/" + project, body={ "accountId": prefix + str(o), "serviceAccount": { "displayName": prefix + str(o) }}))
-    batch.execute()
+def get_project_details(project_input, project_count):
+	passed_check = 0
+	project_inputs = project_input.split(' ')
+	
+	while True:
+		if passed_check == 0:
+			if len(project_inputs) == 2:
+				while True:
+					try:
+						int(project_inputs[1])
+					except ValueError:
+						print('Invalid input for number of accounts. Please try again.')
+						new_input = input(str(project_count) + '. ')
+						project_inputs = new_input.split(' ')
+					else:
+						passed_check = 1
+						break
+				
+				if int(project_inputs[1]) > 0 and int(project_inputs[1]) < 101:
+					pass
+				else:
+					passed_check = 0
+					print('Invalid input for number of accounts. Please try again.')
+					new_input = input(str(project_count) + '. ')
+					project_inputs = new_input.split(' ')
+			else:
+				print('Invalid input. Please try again')
+				new_input = input(str(project_count) + '. ')
+				project_inputs = new_input.split(' ')
 
-def _get_unique_id(id,resp,exception):
-    global unique_ids
-    global failed_create
+		else:
+			break
+			
+	return {"project_id": project_inputs[0], "num_sa": int(project_inputs[1])}
 
-    if exception is not None:
-        err_msg = json.loads(exception.content.decode('utf-8'))['error']['message']
-        if err_msg == 'Maximum number of service accounts on project reached.':
-            pass
-        else:
-            failed_create.append(resp['uniqueId'])
-    else:
-        unique_ids.append(resp['uniqueId'])
-        
-def _get_keys(service,project,ids):
-    batch = service.new_batch_http_request(callback=_get_key)
-    for o in ids:
-        batch.add(service.projects().serviceAccounts().keys().create(name="projects/%s/serviceAccounts/%s" % (project,o), body={ "privateKeyType": "TYPE_GOOGLE_CREDENTIALS_FILE", "keyAlgorithm": "KEY_ALG_RSA_2048" }))
-    batch.execute()
+def create_service_account_and_dump_key(project_id, service_account_name, service_account_filename):
+    global iam
 
-def _get_key(id,resp,exception):
-    global keys
-    if exception is not None:
-        print(json.loads(exception.content.decode('utf-8'))['error'])
-    else:
-        keys.append(resp['privateKeyData'])
+    service_account = iam.projects().serviceAccounts().create(
+		name="projects/" + project_id,
+		body={
+			"accountId": service_account_name,
+			"serviceAccount": {
+				"displayName": service_account_name
+			}
+		}
+	).execute()
 
-def _generate_id():
-    chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
-    return 'saf-' + ''.join(random.choice(chars) for _ in range(25)) + random.choice(chars[1:])
+    key = iam.projects().serviceAccounts().keys().create(
+		name="projects/" + project_id + "/serviceAccounts/" + service_account["uniqueId"],
+		body={
+			"privateKeyType": "TYPE_GOOGLE_CREDENTIALS_FILE",
+			"keyAlgorithm": "KEY_ALG_RSA_2048"
+		}
+	).execute()
+	
+    f = open(service_account_filename, "w")
+    f.write(base64.b64decode(key["privateKeyData"]).decode("utf-8"))
+    f.close()
 
-def _get_projects(service):
-    return service.projects().list().execute()['projects']
-    
-def _def_batch_resp(id,resp,exception):
-    if exception is not None:
-        print(str(exception))
+def service_account_factory(
+    path='accounts',
+    controller='controller/*.json',
+    first_project_no_autofill=False,
+    project_autofill_count=None,
+    custom_prefix='folderclone'):
+    global iam
 
-creds = None
-if os.path.exists('token.pickle'):
-    with open('token.pickle', 'rb') as token:
-        creds = pickle.load(token)
-if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'credentials.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-    with open('token.pickle', 'wb') as token:
-        pickle.dump(creds, token)
+    stt = time.time()
+    project_count = 0
+    project_input = None
+    projects = []
+    project_details = {}
 
-cloud = build("cloudresourcemanager", "v1", credentials=creds)
-iam = build("iam", "v1", credentials=creds)
-services = build("serviceusage","v1",credentials=creds)
+    contrs = glob.glob(controller)
 
-parse = argparse.ArgumentParser(description='A tool to create Google service accounts.')
-parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
-parse.add_argument('--fill-to',help='Max amount of projects to create.')
-parse.add_argument('--email-prefix',default='folderclone',help='Prefix to use for service account emails.')
-
-args = parse.parse_args()
-
-projs = None
-while projs == None:
     try:
-        projs = _get_projects(cloud)
-    except HttpError as e:
-        if json.loads(e.content.decode('utf-8'))['error']['status'] == 'PERMISSION_DENIED':
-            try:
-                services.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % proj_id).execute()
-            except HttpError as e:
-                print(e._get_reason())
-                input('Press Enter to retry.')
+        open(contrs[0],'r')
+        print('Found controllers.')
+    except IndexError:
+        print('No controller found.')
+        sys.exit(0)
+    
+    if not first_project_no_autofill:
+        project_count += 1
+        project_input = json.loads(open(contrs[0],'r').read())['project_id'] + ' 99'
+        project_details = get_project_details(project_input, project_count)
+        print(str(project_count) + '. ' + project_details['project_id'] + ' ' + str(project_details['num_sa']))
+        projects.append(project_details)
 
-print('Using %s' % proj_id)
-print('Found %s projects.' % len(projs))
+    if project_autofill_count == None:
+        print('Add more projects:')
+        print('[project id] [accounts to create]')
 
-fill = int(input('Fill to? '))
-
-batch = cloud.new_batch_http_request(callback=_def_batch_resp)
-for i in range(fill - len(projs)):
-    new_proj = _generate_id()
-    projs.append({'projectId':new_proj})
-    batch.add(cloud.projects().create(body={'project_id':new_proj}))
-batch.execute()
-
-print('Sleeping...')
-time.sleep((fill - len(projs)) * 3)
-
-batch = services.new_batch_http_request(callback=_def_batch_resp)
-for i in projs:
-    batch.add(services.services().enable(name='projects/%s/services/iam.googleapis.com' % i['projectId']))
-    batch.add(services.services().enable(name='projects/%s/services/drive.googleapis.com' % i['projectId']))
-batch.execute()
-
-sas = 0
-
-try:
-    mkdir(args.path)
-except FileExistsError:
-    pass
-
-for project in projs:
-    unique_ids = []
-    keys = []
-    _create_accounts(iam,list(range(100)),args.email_prefix,i['projectId'])
-    retry_count = 0
-    while len(failed_create) > 0:
-        retry_count += 1
-        retry = failed_create
-        failed_create = []
-        _create_accounts(iam,retry,args.email_prefix + "-r-" + str(retry_count) + "-",project['projectId'])
-    resp = iam.projects().serviceAccounts().list(name='projects/' + i['projectId'],pageSize=100).execute()
-    if 'accounts' in resp:
-        for account in resp['accounts']:
-            unique_ids.append(account['uniqueId'])
+        if not first_project_no_autofill:
+            print(str(project_count) + '. ' + project_input)
+        
+        while project_input != '':
+            project_count += 1
+            project_input = input(str(project_count) + '. ')
+            if project_input != '':
+                project_details = get_project_details(project_input, project_count)
+                projects.append(project_details)
+        while len(custom_prefix) < 4:
+            print('Email prefix must be 5 characters or longer!')
+            custom_prefix = input('Custom email prefix? ').lower()
     else:
-        print(resp)
-    _get_keys(iam,project['projectId'],unique_ids)
-    for o in keys:
-        sas += 1
-        with open('%s/SA%d.json' % (args.path,sas),'w+') as f:
-            f.write(base64.b64decode(o).decode('utf-8'))
+        project_count += 1
+        project_input = json.loads(open(contrs[0],'r').read())['project_id'] + ' 100'
+        project_details = get_project_details(project_input, project_count)
+        print(str(project_count) + '. ' + project_details['project_id'] + ' ' + str(project_details['num_sa']))
+        projects.append(project_details)
+
+        if project_autofill_count > 1:
+            for count in range (1,project_autofill_count):
+                project_count += 1
+                project_input = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz-') for i in range(7)) + ' 100'
+                project_details = get_project_details(project_input, project_count)
+                projects.append(project_details)
+
+    print('Using ' + str(len(projects)) + ' projects...')
+
+    credentials = Credentials.from_service_account_file(contrs[0], scopes=[
+        "https://www.googleapis.com/auth/iam"
+        ])
+    iam = googleapiclient.discovery.build("iam", "v1", credentials=credentials)
+
+    try:
+        mkdir(path)
+    except FileExistsError:
+        pass
+
+    gc = 1
+
+    for i in range(len(projects)):
+        print('Creating accounts in ' + projects[i]['project_id'])
+        for o in progressbar.progressbar(range(1, projects[i]['num_sa']+1)):
+            create_service_account_and_dump_key(projects[i]['project_id'],custom_prefix + str(o),path + "/" + str(gc) + '.json')
+            gc += 1
+
+    print('Complete.')
+    hours, rem = divmod((time.time() - stt),3600)
+    minutes, sec = divmod(rem,60)
+    print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours),int(minutes),sec))
+
+def main():
+    parse = argparse.ArgumentParser(description='A tool to create Google service accounts.')
+    parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
+    parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
+    parse.add_argument('--no-autofill',default=False,action='store_true',help='Do not autofill the first project.')
+    parse.add_argument('--project-autofill-count',type=int,help='Number of projects to auto-create.')
+    parse.add_argument('--custom-prefix',default='folderclone',help='Custom Prefix for SAs.')
+
+    args = parse.parse_args()
+
+    if args.project_autofill_count:
+        service_account_factory(
+            path=args.path,
+            controller=args.controller,
+            first_project_no_autofill=args.no_autofill,
+            project_autofill_count=None,
+            custom_prefix=args.custom_prefix)
+    else:
+        service_account_factory(
+            path=args.path,
+            controller=args.controller,
+            first_project_no_autofill=args.no_autofill,
+            project_autofill_count=args.project_autofill_count,
+            custom_prefix=args.custom_prefix)
+
+if __name__ == '__main__':
+    main()
