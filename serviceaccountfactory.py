@@ -145,7 +145,7 @@ def main():
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
     parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
     parse.add_argument('--no-autofill',default=False,action='store_true',help='Do not autofill the first project.')
-    parse.add_argument('--project-autofill',nargs=2,action='append',metavar=('PROJECT_ID','NO_OF_PROJECTS'),required=False,help='Auto add project input to SAF.')
+    parse.add_argument('--project-autofill',nargs=2,action='append',metavar=('PROJECT_ID','NO_OF_ACCOUNTS'),required=False,help='Auto add project input to SAF.')
     parse.add_argument('--custom-prefix',default='folderclone',help='Custom Prefix for SAs.')
 
     args = parse.parse_args()
