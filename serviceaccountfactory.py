@@ -7,8 +7,8 @@ import base64, json, glob, sys, argparse, time, os.path, pickle, requests, rando
 SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
 proj_id = json.loads(open('credentials.json','r').read())['installed']['project_id']
 failed_create = []
-# unique_ids = []
-# keys = []
+unique_ids = []
+keys = []
 
 def _create_accounts(service,todo,prefix,project):
     batch = service.new_batch_http_request(callback=_get_unique_id)
@@ -19,13 +19,13 @@ def _create_accounts(service,todo,prefix,project):
 def _get_unique_id(id,resp,exception):
     global unique_ids
     global failed_create
+
     if exception is not None:
         err_msg = json.loads(exception.content.decode('utf-8'))['error']['message']
         if err_msg == 'Maximum number of service accounts on project reached.':
             pass
         else:
-            # print(err_msg)
-            pass
+            failed_create.append(resp['uniqueId'])
     else:
         unique_ids.append(resp['uniqueId'])
         
@@ -116,10 +116,12 @@ for i in projs:
     unique_ids = []
     keys = []
     _create_accounts(iam,list(range(100)),args.email_prefix,i['projectId'])
-    # while failed_create > 0:
-        # retry = failed_create
-        # failed_create = 0
-        # _create_accounts(iam,retry,'folderclone',i['projectId'])
+    retry_count = 0
+    while failed_create > 0:
+        retry_count += 1
+        retry = failed_create
+        failed_create = 0
+        _create_accounts(iam,retry,args.email_prefix + "-r-" + str(retry_count) + "-",i['projectId'])
     for i in iam.projects().serviceAccounts().list(name='projects/' + i['projectId'],pageSize=100).execute()['accounts']:
         unique_ids.append(i['uniqueId'])
     _get_keys(iam,i['projectId'],unique_ids)
