@@ -40,9 +40,8 @@ class CopyService:
         )
 
         self.response = apicall(self.request)
-        if self.response == {"drive_quotad": 1}:
+        while "drive_quotad" in self.response:
             self.increase_request_dtu_and_retry()
-
         
     def __init__(self, fileId, body):
         global dtu
@@ -52,7 +51,7 @@ class CopyService:
         self.request = drive[self.dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=True)
         self.response = apicall(self.request)
 
-        if self.response == {"drive_quotad": 1}:
+        while "drive_quotad" in self.response:
             self.increase_request_dtu_and_retry()
         
 def apicall(request):
