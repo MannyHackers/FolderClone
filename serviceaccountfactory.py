@@ -117,10 +117,10 @@ for i in projs:
     keys = []
     _create_accounts(iam,list(range(100)),args.email_prefix,i['projectId'])
     retry_count = 0
-    while failed_create > 0:
+    while len(failed_create) > 0:
         retry_count += 1
         retry = failed_create
-        failed_create = 0
+        failed_create = []
         _create_accounts(iam,retry,args.email_prefix + "-r-" + str(retry_count) + "-",i['projectId'])
     for i in iam.projects().serviceAccounts().list(name='projects/' + i['projectId'],pageSize=100).execute()['accounts']:
         unique_ids.append(i['uniqueId'])
