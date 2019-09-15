@@ -52,7 +52,7 @@ class CopyService:
         self.request = drive[self.dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=True)
         self.response = apicall(self.request)
 
-        if "drive_quotad" in self.response:
+        if self.response == {"drive_quotad": 1}:
             self.increase_request_dtu_and_retry()
         
 def apicall(request):
