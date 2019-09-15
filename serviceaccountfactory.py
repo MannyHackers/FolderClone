@@ -119,7 +119,7 @@ try:
 except FileExistsError:
     pass
 
-for i in projs:
+for project in projs:
     unique_ids = []
     keys = []
     _create_accounts(iam,list(range(100)),args.email_prefix,i['projectId'])
@@ -128,10 +128,14 @@ for i in projs:
         retry_count += 1
         retry = failed_create
         failed_create = []
-        _create_accounts(iam,retry,args.email_prefix + "-r-" + str(retry_count) + "-",i['projectId'])
-    for i in iam.projects().serviceAccounts().list(name='projects/' + i['projectId'],pageSize=100).execute()['accounts']:
-        unique_ids.append(i['uniqueId'])
-    _get_keys(iam,i['projectId'],unique_ids)
+        _create_accounts(iam,retry,args.email_prefix + "-r-" + str(retry_count) + "-",project['projectId'])
+    resp = iam.projects().serviceAccounts().list(name='projects/' + i['projectId'],pageSize=100).execute()
+    if 'accounts' in resp:
+        for account in resp['accounts']:
+            unique_ids.append(account['uniqueId'])
+    else:
+        print(resp)
+    _get_keys(iam,project['projectId'],unique_ids)
     for o in keys:
         sas += 1
         with open('%s/SA%d.json' % (args.path,sas),'w+') as f:
