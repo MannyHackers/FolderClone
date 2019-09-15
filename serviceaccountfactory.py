@@ -15,7 +15,7 @@ def get_project_details(project_input, project_count):
 					try:
 						int(project_inputs[1])
 					except ValueError:
-						print('Invalid input for number of accounts. Please try again.')
+						print('Invalid input for number of accounts for project ' + project_inputs[0] + '. Please try again.')
 						new_input = input(str(project_count) + '. ')
 						project_inputs = new_input.split(' ')
 					else:
@@ -26,7 +26,7 @@ def get_project_details(project_input, project_count):
 					pass
 				else:
 					passed_check = 0
-					print('Invalid input for number of accounts. Please try again.')
+					print('Invalid input for number of accounts for project ' + project_inputs[0] + '. Please try again.')
 					new_input = input(str(project_count) + '. ')
 					project_inputs = new_input.split(' ')
 			else:
@@ -68,7 +68,7 @@ def service_account_factory(
     path='accounts',
     controller='controller/*.json',
     first_project_no_autofill=False,
-    project_autofill_count=None,
+    project_autofill=None,
     custom_prefix='folderclone'):
     global iam
 
@@ -91,38 +91,29 @@ def service_account_factory(
         project_count += 1
         project_input = json.loads(open(contrs[0],'r').read())['project_id'] + ' 99'
         project_details = get_project_details(project_input, project_count)
-        print(str(project_count) + '. ' + project_details['project_id'] + ' ' + str(project_details['num_sa']))
         projects.append(project_details)
 
-    if project_autofill_count == None:
+    if project_autofill == None:
         print('Add more projects:')
         print('[project id] [accounts to create]')
-
         if not first_project_no_autofill:
             print(str(project_count) + '. ' + project_input)
-        
         while project_input != '':
             project_count += 1
             project_input = input(str(project_count) + '. ')
             if project_input != '':
                 project_details = get_project_details(project_input, project_count)
                 projects.append(project_details)
-        while len(custom_prefix) < 4:
-            print('Email prefix must be 5 characters or longer!')
-            custom_prefix = input('Custom email prefix? ').lower()
     else:
-        project_count += 1
-        project_input = json.loads(open(contrs[0],'r').read())['project_id'] + ' 100'
-        project_details = get_project_details(project_input, project_count)
-        print(str(project_count) + '. ' + project_details['project_id'] + ' ' + str(project_details['num_sa']))
-        projects.append(project_details)
+        for project in project_autofill:
+            project_count += 1
+            project_input = project[0] + ' ' + project[1]
+            project_details = get_project_details(project_input, project_count)
+            projects.append(project_details)
 
-        if project_autofill_count > 1:
-            for count in range (1,project_autofill_count):
-                project_count += 1
-                project_input = ''.join(random.choice('abcdefghijklmnopqrstuvwxyz-') for i in range(7)) + ' 100'
-                project_details = get_project_details(project_input, project_count)
-                projects.append(project_details)
+    while len(custom_prefix) < 4:
+        print('Email prefix must be 5 characters or longer!')
+        custom_prefix = input('Custom email prefix? ').lower()
 
     print('Using ' + str(len(projects)) + ' projects...')
 
@@ -154,24 +145,24 @@ def main():
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
     parse.add_argument('--controller','-c',default='controller/*.json',help='Specify the relative path for the controller file.')
     parse.add_argument('--no-autofill',default=False,action='store_true',help='Do not autofill the first project.')
-    parse.add_argument('--project-autofill-count',type=int,help='Number of projects to auto-create.')
+    parse.add_argument('--project-autofill',nargs=2,action='append',required=False,help='Auto add project input to SAF.')
     parse.add_argument('--custom-prefix',default='folderclone',help='Custom Prefix for SAs.')
 
     args = parse.parse_args()
 
-    if args.project_autofill_count:
+    if args.project_autofill:
         service_account_factory(
             path=args.path,
             controller=args.controller,
             first_project_no_autofill=args.no_autofill,
-            project_autofill_count=None,
+            project_autofill=args.project_autofill,
             custom_prefix=args.custom_prefix)
     else:
         service_account_factory(
             path=args.path,
             controller=args.controller,
             first_project_no_autofill=args.no_autofill,
-            project_autofill_count=args.project_autofill_count,
+            project_autofill=None,
             custom_prefix=args.custom_prefix)
 
 if __name__ == '__main__':
