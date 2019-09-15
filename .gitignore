@@ -1,4 +1,6 @@
 accounts/
+sa1/
+sa2/
 controller/
 credentials.json
 token.pickle
