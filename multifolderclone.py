@@ -3,7 +3,7 @@ from googleapiclient.errors import HttpError
 import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
 # GLOBAL VARIABLES
-max_retries = 5
+# max_retries = 5
 account_count = 0
 dtu = 1
 drive = []
@@ -62,7 +62,7 @@ class CopyService:
 
 def apicall(request):
     global account_count
-    global max_retries
+    #global max_retries
     global retryable_requests
     global unretryable_requests
 
@@ -81,16 +81,11 @@ def apicall(request):
             if code == 403 and reason == 'userRateLimitExceeded':
                 return {"drive_quotad": 1}
             elif is_retryable_error(code, reason, request):
-                if not retry_count < max_retries:
-                    # TOO MANY RETRY ATTEMPTS, WILL BE RETRIED LATER
-                    retryable_requests.append(request)
-                    break
-                retry_count += 1
-                time.sleep(sleep_time)
-                sleep_time *= 2
-                continue
+                retryable_requests.append(request.to_json())
+                return None
             else:
                 unretryable_requests.append(request)
+                return None
         except socket.error:
             time.sleep(3)
             continue
@@ -180,6 +175,17 @@ def rcopy(source, dest, sname, pre, width):
             ))
             thread.start()
             pbar.next()
+        
+        while len(retryable_requests) > 0:
+            for fileId in retryable_requests:
+                threads.acquire()
+                thread = threading.Thread(
+                    target=copy,
+                    args=(fileId,
+                    dest
+                ))
+                thread.start()
+        
         pbar.finish()
     else:
         print(pres + sname)
