@@ -126,7 +126,7 @@ def ls(parent, searchTerms=""):
         pageSize=1000,
         supportsAllDrives=True,
         includeItemsFromAllDrives=True
-    )
+    ).execute()
     files += resp["files"]
     while "nextPageToken" in resp:
         files += drive[0].files().list(
