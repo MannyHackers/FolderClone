@@ -29,10 +29,16 @@ httplib2shim.patch()
 
 class CopyService:
     def increase_request_dtu_and_retry(self):
+        global drive
+        global account_count
+        
         if self.dtu + 1 == account_count:
+            drive.remove(drive[self.dtu])
+            account_count = len(drive)
             self.dtu = 1
         else:
-            self.dtu += 1
+            drive.remove(drive[self.dtu])
+            account_count = len(drive)
         self.request = drive[self.dtu].files().copy(
             fileId=self.fileId,
             body=self.body,
@@ -53,7 +59,7 @@ class CopyService:
 
         while "drive_quotad" in self.response:
             self.increase_request_dtu_and_retry()
-        
+
 def apicall(request):
     global account_count
     global max_retries
@@ -112,8 +118,6 @@ def is_retryable_error(code, reason, request):
         print("Undocumented API Response code.")
         print("Error Code: " + str(code) + ", Error Reason: " + reason)
         return False
-
-# FUNCTION TO HANDLE API CALLING AND ERROR HANDLING OF API CALLS
 
 def ls(parent, searchTerms=""):
     files = []
