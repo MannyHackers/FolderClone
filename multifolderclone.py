@@ -66,8 +66,8 @@ def apicall(request):
     global retryable_requests
     global unretryable_requests
 
-    retry_count = 0
-    sleep_time = 1
+    #retry_count = 0
+    #sleep_time = 1
     resp = None
 
     while True:
