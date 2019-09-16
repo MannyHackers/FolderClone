@@ -135,7 +135,7 @@ def ls(parent, searchTerms=""):
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageToken=resp["nextPageToken"]
-        )["files"]
+        ).execute()["files"]
     return files
 
 def lsd(parent):
