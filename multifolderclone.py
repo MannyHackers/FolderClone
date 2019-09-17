@@ -110,22 +110,40 @@ def is_retryable_error(code, reason, request):
 
 def ls(parent, searchTerms=""):
     files = []
-    resp = drive[0].files().list(
-        q="'%s' in parents" % parent + searchTerms,
-        pageSize=1000,
-        supportsAllDrives=True,
-        includeItemsFromAllDrives=True
-    ).execute()
-    files += resp["files"]
-    while "nextPageToken" in resp:
-        resp = drive[0].files().list(
-            q="'%s' in parents" % parent + searchTerms,
-            pageSize=1000,
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-            pageToken=resp["nextPageToken"]
-        ).execute()
+    
+    try:
+    	resp = apicall(
+	    	drive[dtu].files().list(
+		        q="'%s' in parents" % parent + searchTerms,
+		        pageSize=1000,
+		        supportsAllDrives=True,
+		        includeItemsFromAllDrives=True
+	    	)
+	    )
+    except DriveQuotadError:
+        if dtu + 1 >= account_count:
+            dtu = 1
+        else:
+            dtu += 1
+    else:
         files += resp["files"]
+
+    while "nextPageToken" in resp:
+        try:
+            resp = drive[dtu].files().list(
+                q="'%s' in parents" % parent + searchTerms,
+                pageSize=1000,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=resp["nextPageToken"]
+            )
+        except DriveQuotadError:
+            if dtu + 1 >= account_count:
+                dtu = 1
+            else:
+                dtu += 1
+        else:
+            files += resp["files"]
     return files
 
 def lsd(parent):
