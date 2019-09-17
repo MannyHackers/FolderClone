@@ -183,8 +183,6 @@ def rcopy(source, dest, sname, pre, width):
         for file in filestocopy:
             local_retryable_requests.append(file["id"])
         
-        pbar = progress.bar.Bar(pres + sname, max=num_files)
-        pbar.update()
         while len(local_retryable_requests) > 0:
             for fileId in local_retryable_requests:
                 copyfileId = fileId
@@ -204,7 +202,7 @@ def rcopy(source, dest, sname, pre, width):
                 if tempfile in retryable_requests:
                     retryable_requests.remove(tempfile)
                 local_retryable_requests.append(tempfile)
-        pbar.finish()
+        print(pres + sname + ' | Done')
 
     else:
         print(pres + sname)
