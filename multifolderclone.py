@@ -289,7 +289,7 @@ def multifolderclone(
 def main():
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
-    parse.add_argument('--path', '-p', default='sa2', help='Specify an alternative path to the service accounts.')
+    parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
     parsereq.add_argument('--destination-id', '-d',help='The destination ID of the folder to copy to.',required=True)
