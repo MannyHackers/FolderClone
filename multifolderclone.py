@@ -199,12 +199,11 @@ def rcopy(source, dest, sname, pre, width):
                     )
                 )
                 thread.start()
-            copied_files = num_files - len(retryable_requests)
-            for file in range(copied_files):
+            for file in range(len(retryable_requests)):
                 tempfile = file
-                retryable_requests.remove(tempfile)
+                if tempfile in retryable_requests:
+                    retryable_requests.remove(tempfile)
                 local_retryable_requests.append(tempfile)
-                pbar.next()
         pbar.finish()
 
     else:
@@ -289,10 +288,10 @@ def multifolderclone(
 def main():
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
-    parse.add_argument('--path', '-p', default='sa1', help='Specify an alternative path to the service accounts.')
+    parse.add_argument('--path', '-p', default='sa2', help='Specify an alternative path to the service accounts.')
     parsereq = parse.add_argument_group('required arguments')
-    parsereq.add_argument('--source-id', '-s',default='1tLO819B_VpYTg1muTUBcyFuO3Tee9FuG',help='The source ID of the folder to copy.')
-    parsereq.add_argument('--destination-id', '-d',default='1KJsiNzt8prYH6-sQdhwaA6cf4IbT-Woe',help='The destination ID of the folder to copy to.')
+    parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
+    parsereq.add_argument('--destination-id', '-d',help='The destination ID of the folder to copy to.',required=True)
     args = parse.parse_args()
 
     multifolderclone(
