@@ -192,10 +192,12 @@ def rcopy(source, dest, sname, pre, width):
                     )
                 )
                 thread.start()
-            for times in range(num_files - len(retryable_requests)):
+            copied_files = num_files - len(retryable_requests)
+            for file in range(copied_files):
+                tempfile = file
+                retryable_requests.remove(tempfile)
+                local_retryable_requests.append(tempfile)
                 pbar.next()
-            local_retryable_requests = retryable_requests
-            retryable_requests = []
         pbar.finish()
 
     else:
