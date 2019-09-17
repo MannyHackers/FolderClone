@@ -217,15 +217,16 @@ def rcopy(source, dest, sname, pre, width):
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
         else:
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "├" + "─" * width + " "
-        resp = drive[0].files().create(
-            body={
-                "name": folder["name"],
-                "mimeType": "application/vnd.google-apps.folder",
-                "parents": [dest]
-            },
-            supportsAllDrives=True
-        ).execute()
-        
+        resp = apicall(
+            drive[0].files().create(
+                body={
+                    "name": folder["name"],
+                    "mimeType": "application/vnd.google-apps.folder",
+                    "parents": [dest]
+                },
+                supportsAllDrives=True
+            )
+        )
         rcopy(
             folder["id"],
             resp["id"],
