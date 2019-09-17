@@ -3,7 +3,6 @@ from googleapiclient.errors import HttpError
 import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
 # GLOBAL VARIABLES
-# max_retries = 5
 account_count = 0
 dtu = 1
 drive = []
@@ -36,12 +35,9 @@ class CopyService:
         global account_count
         
         if self.dtu + 1 == account_count:
-            drive.remove(drive[self.dtu])
-            account_count = len(drive)
             self.dtu = 1
         else:
-            drive.remove(drive[self.dtu])
-            account_count = len(drive)
+            self.dtu += 1
         self.request = drive[self.dtu].files().copy(
             fileId=self.fileId,
             body=self.body,
@@ -66,13 +62,7 @@ class CopyService:
             self.increase_request_dtu_and_retry()
 
 def apicall(request):
-    global account_count
-    #global max_retries
-    global retryable_requests
-    global unretryable_requests
-
-    #retry_count = 0
-    #sleep_time = 1
+    sleep_time = 3
     resp = None
 
     while True:
@@ -82,19 +72,20 @@ def apicall(request):
             error_details = json.loads(error.content.decode("utf-8"))
             code = error_details["error"]["code"]
             reason = error_details["error"]["errors"][0]["reason"]
-            # message = error_details["error"]["errors"][0]["message"]
             if code == 403 and reason == 'userRateLimitExceeded':
                 raise DriveQuotadError
             elif is_retryable_error(code, reason, request):
+                time.sleep(sleep_time)
                 continue
             else:
                 return None
         except socket.error:
-            time.sleep(3)
+            time.sleep(sleep_time)
             continue
         else:
             return resp
         break
+
 # FUNCTION TO CHECK IF ERROR RETURNED IS RETRYABLE OR NOT
 def is_retryable_error(code, reason, request):
     global error_code_reasons
@@ -127,13 +118,14 @@ def ls(parent, searchTerms=""):
     ).execute()
     files += resp["files"]
     while "nextPageToken" in resp:
-        files += drive[0].files().list(
+        resp = drive[0].files().list(
             q="'%s' in parents" % parent + searchTerms,
             pageSize=1000,
             supportsAllDrives=True,
             includeItemsFromAllDrives=True,
             pageToken=resp["nextPageToken"]
-        ).execute()["files"]
+        ).execute()
+        files += resp["files"]
     return files
 
 def lsd(parent):
@@ -149,8 +141,8 @@ def lsf(parent):
     )
 
 def copy(source, dest):
-    global drive
     global threads
+    global unretryable_requests
 
     copy_service = CopyService(
         fileId=source,
@@ -159,8 +151,11 @@ def copy(source, dest):
         }
     )
 
-    if copy_service.response == None:
-        unretryable_requests.append(fileId)
+    if copy_service.response == None:   
+        unretryable_requests.append(source)
+        if len(unretryable_requests) > 0:
+            print("unretryable request")
+            sys.exit()
     else:
         pass
 
@@ -169,20 +164,24 @@ def copy(source, dest):
 def rcopy(source, dest, sname, pre, width):
     global drive
     global threads
-    global account_count
     global retryable_requests
 
+    local_retryable_requests = []
     pres = pre
 
     filestocopy = lsf(source)
-    if len(filestocopy) > 0:
+    num_files = len(filestocopy)
+
+    if num_files > 0:
         for file in filestocopy:
-            retryable_requests.append(file)
+            local_retryable_requests.append(file["id"])
         
-        while len(retryable_requests) > 0:
-            for fileId in retryable_requests:
+        pbar = progress.bar.Bar(pres + sname, max=num_files)
+        pbar.update()
+        while len(local_retryable_requests) > 0:
+            for fileId in local_retryable_requests:
                 copyfileId = fileId
-                retryable_requests.remove(fileId)
+                local_retryable_requests.remove(fileId)
                 
                 threads.acquire()
                 thread = threading.Thread(
@@ -193,6 +192,11 @@ def rcopy(source, dest, sname, pre, width):
                     )
                 )
                 thread.start()
+            for times in range(num_files - len(retryable_requests)):
+                pbar.next()
+            local_retryable_requests = retryable_requests
+            retryable_requests = []
+        pbar.finish()
 
     else:
         print(pres + sname)
@@ -276,10 +280,10 @@ def multifolderclone(
 def main():
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
-    parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
+    parse.add_argument('--path', '-p', default='sa1', help='Specify an alternative path to the service accounts.')
     parsereq = parse.add_argument_group('required arguments')
-    parsereq.add_argument('--source-id', '-s', help='The source ID of the folder to copy.', required=True)
-    parsereq.add_argument('--destination-id', '-d', help='The destination ID of the folder to copy to.', required=True)
+    parsereq.add_argument('--source-id', '-s',default='1tLO819B_VpYTg1muTUBcyFuO3Tee9FuG',help='The source ID of the folder to copy.')
+    parsereq.add_argument('--destination-id', '-d',default='1KJsiNzt8prYH6-sQdhwaA6cf4IbT-Woe',help='The destination ID of the folder to copy to.')
     args = parse.parse_args()
 
     multifolderclone(
