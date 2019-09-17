@@ -62,6 +62,7 @@ class CopyService:
             self.increase_request_dtu_and_retry()
 
 def apicall(request):
+    # MODIFY THE VAR BELOW INCASE YOU WANT TO MODIFY THE SLEEP TIME BETWEEN EACH RETRY ATTEMPT
     sleep_time = 3
     resp = None
 
@@ -111,39 +112,27 @@ def is_retryable_error(code, reason, request):
 def ls(parent, searchTerms=""):
     files = []
     
-    try:
-    	resp = apicall(
-	    	drive[dtu].files().list(
-		        q="'%s' in parents" % parent + searchTerms,
-		        pageSize=1000,
-		        supportsAllDrives=True,
-		        includeItemsFromAllDrives=True
-	    	)
+    resp = apicall(
+	    drive[0].files().list(
+		    q="'%s' in parents" % parent + searchTerms,
+		    pageSize=1000,
+		    supportsAllDrives=True,
+		    includeItemsFromAllDrives=True
 	    )
-    except DriveQuotadError:
-        if dtu + 1 >= account_count:
-            dtu = 1
-        else:
-            dtu += 1
-    else:
-        files += resp["files"]
+	)
+    files += resp["files"]
 
     while "nextPageToken" in resp:
-        try:
-            resp = drive[dtu].files().list(
+        resp = apicall(
+            drive[0].files().list(
                 q="'%s' in parents" % parent + searchTerms,
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
                 pageToken=resp["nextPageToken"]
             )
-        except DriveQuotadError:
-            if dtu + 1 >= account_count:
-                dtu = 1
-            else:
-                dtu += 1
-        else:
-            files += resp["files"]
+        )
+        files += resp["files"]
     return files
 
 def lsd(parent):
