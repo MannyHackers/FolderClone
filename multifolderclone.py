@@ -27,6 +27,9 @@ error_code_reasons = {
 
 httplib2shim.patch()
 
+class DriveQuotadError(Exception):
+    pass
+
 class CopyService:
     def increase_request_dtu_and_retry(self):
         global drive
@@ -45,19 +48,21 @@ class CopyService:
             supportsAllDrives=True
         )
 
-        self.response = apicall(self.request)
-        while "drive_quotad" in self.response:
+        try:
+            self.response = apicall(self.request)
+        except DriveQuotadError:
             self.increase_request_dtu_and_retry()
-        
+
     def __init__(self, fileId, body):
         global dtu
         self.dtu = dtu
         self.fileId = fileId
         self.body = body
         self.request = drive[self.dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=True)
-        self.response = apicall(self.request)
-
-        while "drive_quotad" in self.response:
+        
+        try:
+            self.response = apicall(self.request)
+        except DriveQuotadError:
             self.increase_request_dtu_and_retry()
 
 def apicall(request):
@@ -79,12 +84,10 @@ def apicall(request):
             reason = error_details["error"]["errors"][0]["reason"]
             # message = error_details["error"]["errors"][0]["message"]
             if code == 403 and reason == 'userRateLimitExceeded':
-                return {"drive_quotad": 1}
+                raise DriveQuotadError
             elif is_retryable_error(code, reason, request):
-                retryable_requests.append(request.to_json())
-                return None
+                continue
             else:
-                unretryable_requests.append(request)
                 return None
         except socket.error:
             time.sleep(3)
@@ -149,44 +152,48 @@ def copy(source, dest):
     global drive
     global threads
 
-    CopyService(
+    copy_service = CopyService(
         fileId=source,
-        body={"parents": [dest]}
+        body={
+            "parents": [dest]
+        }
     )
+
+    if copy_service.response == None:
+        unretryable_requests.append(fileId)
+    else:
+        pass
 
     threads.release()
 
 def rcopy(source, dest, sname, pre, width):
     global drive
+    global threads
     global account_count
+    global retryable_requests
 
     pres = pre
 
     filestocopy = lsf(source)
     if len(filestocopy) > 0:
-        pbar = progress.bar.Bar(pres + sname, max=len(filestocopy))
-        pbar.update()
         for file in filestocopy:
-            threads.acquire()
-            thread = threading.Thread(
-                target=copy,
-                args=(file["id"],
-                dest
-            ))
-            thread.start()
-            pbar.next()
+            retryable_requests.append(file)
         
         while len(retryable_requests) > 0:
             for fileId in retryable_requests:
+                copyfileId = fileId
+                retryable_requests.remove(fileId)
+                
                 threads.acquire()
                 thread = threading.Thread(
                     target=copy,
-                    args=(fileId,
-                    dest
-                ))
+                    args=(
+                        copyfileId,
+                        dest
+                    )
+                )
                 thread.start()
-        
-        pbar.finish()
+
     else:
         print(pres + sname)
     
