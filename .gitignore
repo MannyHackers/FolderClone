@@ -1,8 +1,8 @@
 accounts/
 sa1/
 sa2/
+.vscode/
 controller/
 credentials.json
 token.pickle
-.vscode/.ropeproject/config.py
-.vscode/.ropeproject/objectdb
+
