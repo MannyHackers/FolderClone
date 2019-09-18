@@ -72,7 +72,11 @@ def apicall(request):
         try:
             resp = request.execute()
         except HttpError as error:
-            error_details = json.loads(error.content.decode("utf-8"))
+            try:
+                error_details = json.loads(error.content.decode("utf-8"))
+            except json.decoder.JSONDecodeError:
+                time.sleep(sleep_time)
+                continue
             code = error_details["error"]["code"]
             reason = error_details["error"]["errors"][0]["reason"]
             if code == 403 and reason == 'userRateLimitExceeded':
