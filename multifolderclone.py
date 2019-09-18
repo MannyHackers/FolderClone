@@ -16,7 +16,8 @@ error_code_reasons = {
     "retryable": {
         403: ['dailyLimitExceeded', 'userRateLimitExceeded', 'rateLimitExceeded', 'sharingRateLimitExceeded', 'appNotAuthorizedToFile', 'insufficientFilePermissions', 'domainPolicy'],
         429: ['rateLimitExceeded'],
-        500: ['backendError','internalError']
+        500: ['backendError','internalError'],
+        503: ['backendError']
     },
     "unretryable": {
         400: ['badRequest', 'invalidSharingRequest'],
