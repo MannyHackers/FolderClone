@@ -114,8 +114,8 @@ def ls(parent, searchTerms=""):
     
     resp = apicall(
 	    drive[0].files().list(
-		    q="'%s' in parents" % parent + searchTerms,
-            fields='files(md5Checksum,id,name)',
+		    q="'" + parent + "' in parents" + searchTerms,
+            fields='files(md5Checksum,id,name),nextPageToken',
 		    pageSize=1000,
 		    supportsAllDrives=True,
 		    includeItemsFromAllDrives=True
@@ -126,8 +126,8 @@ def ls(parent, searchTerms=""):
     while "nextPageToken" in resp:
         resp = apicall(
             drive[0].files().list(
-                q="'%s' in parents and trashed=false" % parent + searchTerms,
-                fields='files(md5Checksum,id,name)',
+                q="'" + parent + "' in parents" + searchTerms,
+                fields='files(md5Checksum,id,name),nextPageToken',
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -203,8 +203,6 @@ def rcopy(source, dest, sname, pre, width):
         for file in files_to_copy:
             local_retryable_requests.append(file["id"])
         
-        pbar = progress.bar.Bar(pres + sname, max=num_files)
-        pbar.update()
         while len(local_retryable_requests) > 0:
             for fileId in local_retryable_requests:
                 copyfileId = fileId
@@ -224,7 +222,7 @@ def rcopy(source, dest, sname, pre, width):
                 if tempfile in retryable_requests:
                     retryable_requests.remove(tempfile)
                 local_retryable_requests.append(tempfile)
-        pbar.finish()
+        print(pres + sname + ' | Done')
     else:
         print(pres + sname)
     
