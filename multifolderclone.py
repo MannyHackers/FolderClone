@@ -115,6 +115,7 @@ def ls(parent, searchTerms=""):
     resp = apicall(
 	    drive[0].files().list(
 		    q="'%s' in parents" % parent + searchTerms,
+            fields='files(md5Checksum,id,name)',
 		    pageSize=1000,
 		    supportsAllDrives=True,
 		    includeItemsFromAllDrives=True
@@ -125,7 +126,8 @@ def ls(parent, searchTerms=""):
     while "nextPageToken" in resp:
         resp = apicall(
             drive[0].files().list(
-                q="'%s' in parents" % parent + searchTerms,
+                q="'%s' in parents and trashed=false" % parent + searchTerms,
+                fields='files(md5Checksum,id,name)',
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -176,13 +178,33 @@ def rcopy(source, dest, sname, pre, width):
     local_retryable_requests = []
     pres = pre
 
-    filestocopy = lsf(source)
-    num_files = len(filestocopy)
+    files_to_copy = []
+    files_source = lsf(source)
+    files_dest = lsf(dest)
+    files_source_id = []
+    files_dest_id = []
+    for i in files_source:
+        files_source_id.append(dict(i))
+        i.pop('id')
+    for i in files_dest:
+        files_dest_id.append(dict(i))
+        i.pop('id')
+    i = 0
+
+    while len(files_source) > i:
+        if files_source[i] not in files_dest:
+            files_to_copy.append(files_source_id[i])
+        i += 1
+
+    num_files = len(files_to_copy)
+
 
     if num_files > 0:
-        for file in filestocopy:
+        for file in files_to_copy:
             local_retryable_requests.append(file["id"])
         
+        pbar = progress.bar.Bar(pres + sname, max=num_files)
+        pbar.update()
         while len(local_retryable_requests) > 0:
             for fileId in local_retryable_requests:
                 copyfileId = fileId
@@ -202,44 +224,45 @@ def rcopy(source, dest, sname, pre, width):
                 if tempfile in retryable_requests:
                     retryable_requests.remove(tempfile)
                 local_retryable_requests.append(tempfile)
-        print(pres + sname + ' | Done')
-
+        pbar.finish()
     else:
         print(pres + sname)
     
-    folderstocopy = lsd(source)
-    fs = len(folderstocopy) - 1
+    folders_source = lsd(source)
+    folders_dest = lsd(dest)
+    folders_copied = {}
+    for i in folders_dest:
+        folders_copied[i['name']] = i['id']
+    fs = len(folders_source) - 1
     s = 0
-    for folder in folderstocopy:
+    for folder in folders_source:
         if s == fs:
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
         else:
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "├" + "─" * width + " "
-        resp = apicall(
-            drive[0].files().create(
-                body={
-                    "name": folder["name"],
-                    "mimeType": "application/vnd.google-apps.folder",
-                    "parents": [dest]
-                },
-                supportsAllDrives=True
-            )
-        )
+        if folder['name'] not in folders_copied.keys():
+            folder_id = apicall(
+                drive[0].files().create(
+                    body={
+                        "name": folder["name"],
+                        "mimeType": "application/vnd.google-apps.folder",
+                        "parents": [dest]
+                    },
+                    supportsAllDrives=True
+                )
+            )['id']
+        else:
+            folder_id = folders_copied[folder['name']]
         rcopy(
             folder["id"],
-            resp["id"],
+            folder_id,
             folder["name"].replace('%', "%%"),
             nstu,
             width
         )
         s += 1
 
-def multifolderclone(
-    source=None,
-    dest=None,
-    path='accounts',
-    width=2
-):
+def multifolderclone(source=None, dest=None, path='accounts', width=2):
     global account_count
     global drive
     global threads
@@ -302,3 +325,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
