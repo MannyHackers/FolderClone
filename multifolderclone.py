@@ -1,5 +1,6 @@
 from google.oauth2.service_account import Credentials
 from googleapiclient.errors import HttpError
+from urllib3.exceptions import ProtocolError
 import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
 # GLOBAL VARIABLES
@@ -81,6 +82,9 @@ def apicall(request):
             else:
                 return None
         except socket.error:
+            time.sleep(sleep_time)
+            continue
+        except ProtocolError:
             time.sleep(sleep_time)
             continue
         else:
