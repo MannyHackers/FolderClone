@@ -177,6 +177,7 @@ def rcopy(source, dest, sname, pre, width):
 
     local_retryable_requests = []
     pres = pre
+
     files_to_copy = []
     files_source = lsf(source)
     files_dest = lsf(dest)
@@ -261,7 +262,7 @@ def rcopy(source, dest, sname, pre, width):
         )
         s += 1
 
-def multifolderclone(source=None,dest=None,path='accounts',width=2):
+def multifolderclone(source=None, dest=None, path='accounts', width=2):
     global account_count
     global drive
     global threads
@@ -324,3 +325,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    
