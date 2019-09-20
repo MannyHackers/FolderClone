@@ -1,13 +1,12 @@
 from google.oauth2.service_account import Credentials
 from googleapiclient.errors import HttpError
+from urllib3.exceptions import ProtocolError
 import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
 # GLOBAL VARIABLES
 account_count = 0
 dtu = 1
 drive = []
-retryable_requests = []
-unretryable_requests = []
 threads = None
 
 # DOCUMENTED ERROR CODES & REASONS
@@ -15,7 +14,8 @@ error_code_reasons = {
     "retryable": {
         403: ['dailyLimitExceeded', 'userRateLimitExceeded', 'rateLimitExceeded', 'sharingRateLimitExceeded', 'appNotAuthorizedToFile', 'insufficientFilePermissions', 'domainPolicy'],
         429: ['rateLimitExceeded'],
-        500: ['backendError','internalError']
+        500: ['backendError','internalError'],
+        503: ['backendError']
     },
     "unretryable": {
         400: ['badRequest', 'invalidSharingRequest'],
@@ -70,7 +70,11 @@ def apicall(request):
         try:
             resp = request.execute()
         except HttpError as error:
-            error_details = json.loads(error.content.decode("utf-8"))
+            try:
+                error_details = json.loads(error.content.decode("utf-8"))
+            except json.decoder.JSONDecodeError:
+                time.sleep(sleep_time)
+                continue
             code = error_details["error"]["code"]
             reason = error_details["error"]["errors"][0]["reason"]
             if code == 403 and reason == 'userRateLimitExceeded':
@@ -80,7 +84,7 @@ def apicall(request):
                 continue
             else:
                 return None
-        except socket.error:
+        except (socket.error, ProtocolError):
             time.sleep(sleep_time)
             continue
         else:
@@ -114,8 +118,8 @@ def ls(parent, searchTerms=""):
     
     resp = apicall(
 	    drive[0].files().list(
-		    q="'%s' in parents" % parent + searchTerms,
-            fields='files(md5Checksum,id,name)',
+		    q="'" + parent + "' in parents" + searchTerms,
+            fields='files(md5Checksum,id,name),nextPageToken',
 		    pageSize=1000,
 		    supportsAllDrives=True,
 		    includeItemsFromAllDrives=True
@@ -126,8 +130,8 @@ def ls(parent, searchTerms=""):
     while "nextPageToken" in resp:
         resp = apicall(
             drive[0].files().list(
-                q="'%s' in parents and trashed=false" % parent + searchTerms,
-                fields='files(md5Checksum,id,name)',
+                q="'" + parent + "' in parents" + searchTerms,
+                fields='files(md5Checksum,id,name),nextPageToken',
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True,
@@ -151,45 +155,41 @@ def lsf(parent):
 
 def copy(source, dest):
     global threads
-    global unretryable_requests
 
-    copy_service = CopyService(
+    CopyService(
         fileId=source,
         body={
             "parents": [dest]
         }
     )
 
-    if copy_service.response == None:   
-        unretryable_requests.append(source)
-        if len(unretryable_requests) > 0:
-            print("unretryable request")
-            sys.exit()
-    else:
-        pass
-
     threads.release()
 
 def rcopy(source, dest, sname, pre, width):
     global drive
     global threads
-    global retryable_requests
 
     local_retryable_requests = []
     pres = pre
-
-    files_to_copy = []
     files_source = lsf(source)
     files_dest = lsf(dest)
+    folders_source = lsd(source)
+    folders_dest = lsd(dest)
+    files_to_copy = []
     files_source_id = []
     files_dest_id = []
+
+    s = 0
+    i = 0
+    fs = len(folders_source) - 1
+
+    folders_copied = {}
     for i in files_source:
         files_source_id.append(dict(i))
         i.pop('id')
     for i in files_dest:
         files_dest_id.append(dict(i))
         i.pop('id')
-    i = 0
 
     while len(files_source) > i:
         if files_source[i] not in files_dest:
@@ -198,13 +198,10 @@ def rcopy(source, dest, sname, pre, width):
 
     num_files = len(files_to_copy)
 
-
     if num_files > 0:
         for file in files_to_copy:
             local_retryable_requests.append(file["id"])
         
-        pbar = progress.bar.Bar(pres + sname, max=num_files)
-        pbar.update()
         while len(local_retryable_requests) > 0:
             for fileId in local_retryable_requests:
                 copyfileId = fileId
@@ -219,22 +216,13 @@ def rcopy(source, dest, sname, pre, width):
                     )
                 )
                 thread.start()
-            for file in range(len(retryable_requests)):
-                tempfile = file
-                if tempfile in retryable_requests:
-                    retryable_requests.remove(tempfile)
-                local_retryable_requests.append(tempfile)
-        pbar.finish()
+        print(pres + sname + ' | Done')
     else:
         print(pres + sname)
     
-    folders_source = lsd(source)
-    folders_dest = lsd(dest)
-    folders_copied = {}
     for i in folders_dest:
         folders_copied[i['name']] = i['id']
-    fs = len(folders_source) - 1
-    s = 0
+    
     for folder in folders_source:
         if s == fs:
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
@@ -270,15 +258,13 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
     stt = time.time()
     accounts = glob.glob(path + '/*.json')
 
-    if source == None:
+    while source == None or source == '':
         source = input("Source Folder ID Missing. Please enter Folder ID of source: ")
-    else:
-        if dest == None:
-            dest = input("Destination Folder ID Missing. Please enter Folder ID of destination: ")
-        else:
-            while len(accounts) == 0:
-                path = input("No service accounts found in current directory. Please enter the path where the accounts are located at: ")
-                accounts = glob.glob(path + '/*.json')
+    while dest == None or dest == '':
+        dest = input("Destination Folder ID Missing. Please enter Folder ID of destination: ")
+    while len(accounts) == 0:
+        path = input("No service accounts found in current directory. Please enter the path where the accounts are located at: ")
+        accounts = glob.glob(path + '/*.json')
 
     print('Copy from ' + source + ' to ' + dest + '.')
     print('View set to tree (' + str(width) + ').')
