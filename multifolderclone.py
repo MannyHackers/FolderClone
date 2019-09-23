@@ -147,10 +147,9 @@ def rcopy(drive, dtu, source, dest, sname, pre, width):
             dtu += 1
             if dtu > len(drive) - 1:
                 dtu = 1
-        if len(files_source) == len(files_dest):
-            print(pres + sname + ' | Already Up-to-date')
-        else:
-            print(pres + sname + ' | Synced')
+        print(pres + sname + ' | Synced')
+    elif len(files_source) == len(files_dest):
+        print(pres + sname + ' | Already Up-to-date')
     else:
         print(pres + sname)
     for i in bad_drives:
