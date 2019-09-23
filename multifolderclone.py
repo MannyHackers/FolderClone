@@ -1,72 +1,41 @@
 from google.oauth2.service_account import Credentials
 from googleapiclient.errors import HttpError
 from urllib3.exceptions import ProtocolError
-import googleapiclient.discovery, progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
+from googleapiclient.discovery import build
+import progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
-# GLOBAL VARIABLES
 account_count = 0
 dtu = 1
 drive = []
 threads = None
+bad_drives = []
 
-# DOCUMENTED ERROR CODES & REASONS
-error_code_reasons = {
-    "retryable": {
-        403: ['dailyLimitExceeded', 'userRateLimitExceeded', 'rateLimitExceeded', 'sharingRateLimitExceeded', 'appNotAuthorizedToFile', 'insufficientFilePermissions', 'domainPolicy'],
-        429: ['rateLimitExceeded'],
-        500: ['backendError','internalError'],
-        503: ['backendError']
-    },
-    "unretryable": {
-        400: ['badRequest', 'invalidSharingRequest'],
-        401: ['authError'],
-        404: ['notFound'],
-    }
+error_codes = {
+    'dailyLimitExceeded': True,
+    'userRateLimitExceeded': True,
+    'rateLimitExceeded': True,
+    'sharingRateLimitExceeded': True,
+    'appNotAuthorizedToFile': True,
+    'insufficientFilePermissions': True,
+    'domainPolicy': True,
+    'rateLimitExceeded': True,
+    'backendError': True,
+    'internalError': True,
+    'badRequest': False,
+    'invalidSharingRequest': False,
+    'authError': False,
+    'notFound': False
 }
 
 httplib2shim.patch()
-
-class DriveQuotadError(Exception):
-    pass
-
-class CopyService:
-    def increase_request_dtu_and_retry(self):
-        global drive
-        global account_count
-        
-        if self.dtu + 1 == account_count:
-            self.dtu = 1
-        else:
-            self.dtu += 1
-        self.request = drive[self.dtu].files().copy(
-            fileId=self.fileId,
-            body=self.body,
-            supportsAllDrives=True
-        )
-
-        try:
-            self.response = apicall(self.request)
-        except DriveQuotadError:
-            self.increase_request_dtu_and_retry()
-
-    def __init__(self, fileId, body):
-        global dtu
-        self.dtu = dtu
-        self.fileId = fileId
-        self.body = body
-        self.request = drive[self.dtu].files().copy(fileId=fileId,body=body,supportsAllDrives=True)
-        
-        try:
-            self.response = apicall(self.request)
-        except DriveQuotadError:
-            self.increase_request_dtu_and_retry()
-
-def apicall(request):
-    # MODIFY THE VAR BELOW INCASE YOU WANT TO MODIFY THE SLEEP TIME BETWEEN EACH RETRY ATTEMPT
-    sleep_time = 3
+def apicall(request,sleep_time=1,max_retries=3):
     resp = None
+    tries = 0
 
     while True:
+        tries += 1
+        if tries > max_retries:
+            return None
         try:
             resp = request.execute()
         except HttpError as error:
@@ -75,11 +44,10 @@ def apicall(request):
             except json.decoder.JSONDecodeError:
                 time.sleep(sleep_time)
                 continue
-            code = error_details["error"]["code"]
             reason = error_details["error"]["errors"][0]["reason"]
-            if code == 403 and reason == 'userRateLimitExceeded':
-                raise DriveQuotadError
-            elif is_retryable_error(code, reason, request):
+            if reason == 'userRateLimitExceeded':
+                return False
+            elif error_codes[reason]:
                 time.sleep(sleep_time)
                 continue
             else:
@@ -89,42 +57,19 @@ def apicall(request):
             continue
         else:
             return resp
-        break
-
-# FUNCTION TO CHECK IF ERROR RETURNED IS RETRYABLE OR NOT
-def is_retryable_error(code, reason, request):
-    global error_code_reasons
-
-    if code in error_code_reasons["retryable"]:
-        if reason not in error_code_reasons["retryable"][code]:
-            # UNDOCUMENTED REASON, BUT RETRYABLE
-            print("Retryable error, with undocumented reason.")
-            print("Error Code: " + str(code) + ", Error Reason: " + reason)
-        return True
-    elif code in error_code_reasons["unretryable"]:
-        if reason not in error_code_reasons["unretryable"][code]:
-            # UNDOCUMENTED REASON WITH UNRETRYABLE CODE
-            print("Unretryable error, with undocumented reason.")
-            print("Error Code: " + str(code) + ", Error Reason: " + reason)
-        return False
-    else:
-        # UNKNOWN CODE ERROR
-        print("Undocumented API Response code.")
-        print("Error Code: " + str(code) + ", Error Reason: " + reason)
-        return False
 
 def ls(parent, searchTerms=""):
     files = []
     
     resp = apicall(
-	    drive[0].files().list(
-		    q="'" + parent + "' in parents" + searchTerms,
+        drive[0].files().list(
+            q="'" + parent + "' in parents" + searchTerms,
             fields='files(md5Checksum,id,name),nextPageToken',
-		    pageSize=1000,
-		    supportsAllDrives=True,
-		    includeItemsFromAllDrives=True
-	    )
-	)
+            pageSize=1000,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        )
+    )
     files += resp["files"]
 
     while "nextPageToken" in resp:
@@ -153,23 +98,15 @@ def lsf(parent):
         searchTerms=" and not mimeType contains 'application/vnd.google-apps.folder'"
     )
 
-def copy(source, dest):
-    global threads
-
-    CopyService(
-        fileId=source,
-        body={
-            "parents": [dest]
-        }
-    )
-
+def copy(driv, source, dest):
+    if apicall(driv.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True)) == False:
+        bad_drives.append(driv)
     threads.release()
 
-def rcopy(source, dest, sname, pre, width):
-    global drive
+def rcopy(drive, dtu, source, dest, sname, pre, width):
     global threads
+    global bad_drives
 
-    local_retryable_requests = []
     pres = pre
     files_source = lsf(source)
     files_dest = lsf(dest)
@@ -179,7 +116,6 @@ def rcopy(source, dest, sname, pre, width):
     files_source_id = []
     files_dest_id = []
 
-    s = 0
     i = 0
     fs = len(folders_source) - 1
 
@@ -190,39 +126,41 @@ def rcopy(source, dest, sname, pre, width):
     for i in files_dest:
         files_dest_id.append(dict(i))
         i.pop('id')
-
+    i = 0
     while len(files_source) > i:
         if files_source[i] not in files_dest:
             files_to_copy.append(files_source_id[i])
         i += 1
 
-    num_files = len(files_to_copy)
-
-    if num_files > 0:
+    if len(files_to_copy) > 0:
         for file in files_to_copy:
-            local_retryable_requests.append(file["id"])
-        
-        while len(local_retryable_requests) > 0:
-            for fileId in local_retryable_requests:
-                copyfileId = fileId
-                local_retryable_requests.remove(fileId)
-                
-                threads.acquire()
-                thread = threading.Thread(
-                    target=copy,
-                    args=(
-                        copyfileId,
-                        dest
-                    )
+            threads.acquire()
+            thread = threading.Thread(
+                target=copy,
+                args=(
+                    drive[dtu],
+                    file['id'],
+                    dest
                 )
-                thread.start()
-        print(pres + sname + ' | Done')
+            )
+            thread.start()
+            dtu += 1
+            if dtu > len(drive) - 1:
+                dtu = 1
+        if len(files_source) == len(files_dest):
+            print(pres + sname + ' | Already Up-to-date')
+        else:
+            print(pres + sname + ' | Synced')
     else:
         print(pres + sname)
-    
+    for i in bad_drives:
+        drives.remove(i)
+    bad_drives = []
+
     for i in folders_dest:
         folders_copied[i['name']] = i['id']
     
+    s = 0
     for folder in folders_source:
         if s == fs:
             nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
@@ -241,7 +179,9 @@ def rcopy(source, dest, sname, pre, width):
             )['id']
         else:
             folder_id = folders_copied[folder['name']]
-        rcopy(
+        drive = rcopy(
+            drive,
+            dtu,
             folder["id"],
             folder_id,
             folder["name"].replace('%', "%%"),
@@ -249,6 +189,7 @@ def rcopy(source, dest, sname, pre, width):
             width
         )
         s += 1
+    return drive
 
 def multifolderclone(source=None, dest=None, path='accounts', width=2):
     global account_count
@@ -258,15 +199,19 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
     stt = time.time()
     accounts = glob.glob(path + '/*.json')
 
-    while source == None or source == '':
-        source = input("Source Folder ID Missing. Please enter Folder ID of source: ")
-    while dest == None or dest == '':
-        dest = input("Destination Folder ID Missing. Please enter Folder ID of destination: ")
-    while len(accounts) == 0:
-        path = input("No service accounts found in current directory. Please enter the path where the accounts are located at: ")
-        accounts = glob.glob(path + '/*.json')
+    check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
+    try:
+        root_dir = check.files().get(fileId=source, supportsAllDrives=True).execute()['name']
+    except HttpError:
+        print('Source folder cannot be read or is invalid.')
+        sys.exit(0)
+    try:
+        dest_dir = check.files().get(fileId=dest, supportsAllDrives=True).execute()['name']
+    except HttpError:
+        print('Destination folder cannot be read or is invalid.')
+        sys.exit(0)
 
-    print('Copy from ' + source + ' to ' + dest + '.')
+    print('Copy from ' + root_dir + ' to ' + dest_dir + '.')
     print('View set to tree (' + str(width) + ').')
     pbar = progress.bar.Bar("Creating Drive Services", max=len(accounts))
 
@@ -275,7 +220,7 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
         credentials = Credentials.from_service_account_file(account, scopes=[
             "https://www.googleapis.com/auth/drive"
         ])
-        drive.append(googleapiclient.discovery.build("drive", "v3", credentials=credentials))
+        drive.append(build("drive", "v3", credentials=credentials))
         pbar.next()
     pbar.finish()
 
@@ -283,7 +228,7 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
     print('BoundedSemaphore with %d threads' % account_count)
 
     try:
-        rcopy(source, dest, "root", "", width)
+        rcopy(drive, 1, source, dest, "root", "", width)
     except KeyboardInterrupt:
         print('Quitting')
         sys.exit()
