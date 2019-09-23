@@ -99,6 +99,7 @@ def lsf(parent):
     )
 
 def copy(driv, source, dest):
+    global bad_drives
     if apicall(driv.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True)) == False:
         bad_drives.append(driv)
     threads.release()
