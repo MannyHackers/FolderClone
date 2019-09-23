@@ -18,7 +18,6 @@ error_codes = {
     'appNotAuthorizedToFile': True,
     'insufficientFilePermissions': True,
     'domainPolicy': True,
-    'rateLimitExceeded': True,
     'backendError': True,
     'internalError': True,
     'badRequest': False,
@@ -29,6 +28,8 @@ error_codes = {
 
 httplib2shim.patch()
 def apicall(request,sleep_time=1,max_retries=3):
+    global error_codes
+    
     resp = None
     tries = 0
 
@@ -154,7 +155,7 @@ def rcopy(drive, dtu, source, dest, sname, pre, width):
     else:
         print(pres + sname)
     for i in bad_drives:
-        drives.remove(i)
+        drive.remove(i)
     bad_drives = []
 
     for i in folders_dest:
