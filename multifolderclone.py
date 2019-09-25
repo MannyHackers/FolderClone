@@ -6,6 +6,7 @@ import progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket,
 
 account_count = 0
 dtu = 1
+retry = []
 drive = []
 threads = None
 bad_drives = []
@@ -27,6 +28,13 @@ error_codes = {
 }
 
 httplib2shim.patch()
+
+def log(*l):
+    global debug
+    if debug:
+        for i in l:
+            print(i)
+
 def apicall(request,sleep_time=1,max_retries=3):
     global error_codes
     
@@ -39,7 +47,10 @@ def apicall(request,sleep_time=1,max_retries=3):
             return None
         try:
             resp = request.execute()
+            if tries > 1:
+                log('Successfully retried')
         except HttpError as error:
+            log(error)
             try:
                 error_details = json.loads(error.content.decode("utf-8"))
             except json.decoder.JSONDecodeError:
@@ -101,12 +112,15 @@ def lsf(parent):
 
 def copy(driv, source, dest):
     global bad_drives
+    global retry
     if apicall(driv.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True)) == False:
         bad_drives.append(driv)
+        retry.append((source,dest))
     threads.release()
 
 def rcopy(drive, dtu, source, dest, sname, pre, width):
     global threads
+    global retry
     global bad_drives
 
     pres = pre
@@ -133,7 +147,21 @@ def rcopy(drive, dtu, source, dest, sname, pre, width):
         if files_source[i] not in files_dest:
             files_to_copy.append(files_source_id[i])
         i += 1
-
+    for i in retry:
+        threads.acquire()
+        thread = threading.Thread(
+            target=copy,
+            args=(
+                drive[dtu],
+                i[0],
+                i[1]
+            )
+        )
+        thread.start()
+        dtu += 1
+        if dtu > len(drive) - 1:
+            dtu = 1
+    retry = []
     if len(files_to_copy) > 0:
         for file in files_to_copy:
             threads.acquire()
@@ -150,13 +178,19 @@ def rcopy(drive, dtu, source, dest, sname, pre, width):
             if dtu > len(drive) - 1:
                 dtu = 1
         print(pres + sname + ' | Synced')
-    elif len(files_source) == len(files_dest):
-        print(pres + sname + ' | Already Up-to-date')
+    elif len(files_source) > 0 and len(files_source) <= len(files_dest):
+        print(pres + sname + ' | Up to date')
     else:
         print(pres + sname)
+    log(len(bad_drives),bad_drives)
+    log(len(drive))
     for i in bad_drives:
-        drive.remove(i)
+        if i in drive:
+            drive.remove(i)
     bad_drives = []
+    if len(drive) == 1:
+        print('Out of SAs.')
+        return
 
     for i in folders_dest:
         folders_copied[i['name']] = i['id']
@@ -240,14 +274,16 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
     print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), sec))
 
 def main():
+    global debug
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
     parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
     parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
+    parse.add_argument('--debug-mode',default=False,action='store_true',help='Completely verbose.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
     parsereq.add_argument('--destination-id', '-d',help='The destination ID of the folder to copy to.',required=True)
     args = parse.parse_args()
-
+    debug = args.debug_mode
     multifolderclone(
         args.source_id,
         args.destination_id,
