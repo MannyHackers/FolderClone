@@ -5,7 +5,6 @@ from googleapiclient.errors import HttpError
 import base64, json, progress.bar, glob, sys, argparse, time, os.path, pickle, requests, random
 
 SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
-proj_id = json.loads(open('credentials.json','r').read())['installed']['project_id']
 project_create_ops = []
 
 def _create_accounts(service,project,count):
@@ -87,6 +86,7 @@ def _create_sa_keys(iam,projects,path):
         pbar.finish()
 
 def serviceaccountfactory(path=None,credentials='credentials.json',download_keys=None,create_sas=None,token='token.pickle',enable_services=None,list_projects=False,list_sas=None,create_projects=None,services=None):
+    proj_id = json.loads(open(credentials,'r').read())['installed']['project_id']
     creds = None
     if os.path.exists(token):
         with open(token, 'rb') as t:
