@@ -7,6 +7,7 @@ import base64, json, progress.bar, glob, sys, argparse, time, os, pickle, reques
 SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
 project_create_ops = []
 current_key_dump = []
+sleep_time = 60
 
 # Create count SAs in project
 def _create_accounts(service,project,count):
@@ -20,7 +21,7 @@ def _create_accounts(service,project,count):
 def _create_remaining_accounts(iam,project):
     print('Creating accounts in %s' % project)
     sa_count = len(_list_sas(iam,project))
-    while sa_count < 100:
+    while sa_count != 100:
         _create_accounts(iam,project,100 - sa_count)
         sa_count = len(_list_sas(iam,project))
 
@@ -36,7 +37,10 @@ def _get_projects(service):
 # Default batch callback handler
 def _def_batch_resp(id,resp,exception):
     if exception is not None:
-        print(str(exception))
+        if str(exception).startswith('<HttpError 429'):
+            time.sleep(0.2)
+        else:
+            print(str(exception))
 
 # Project Creation Batch Handler
 def _pc_resp(id,resp,exception):
@@ -85,7 +89,10 @@ def _list_sas(iam,project):
 def _batch_keys_resp(id,resp,exception):
     global current_key_dump
     if exception is not None:
-        print(str(exception))
+        current_key_dump = None
+        time.sleep(0.2)
+    elif current_key_dump is None:
+        time.sleep(0.2)
     else:
         current_key_dump.append((
             resp['name'][resp['name'].rfind('/'):],
@@ -96,24 +103,35 @@ def _batch_keys_resp(id,resp,exception):
 def _create_sa_keys(iam,projects,path):
     global current_key_dump
     for i in projects:
-        batch = iam.new_batch_http_request(callback=_batch_keys_resp)
-        total_sas = _list_sas(iam,i)
+        current_key_dump = []
         print('Downloading keys from %s' % i)
-        # pbar = progress.bar.Bar('Downloading keys from %s' % i, max=len(total_sas))
-        for j in total_sas:
-            batch.add(iam.projects().serviceAccounts().keys().create(
-                name='projects/%s/serviceAccounts/%s' % (i,j['uniqueId']),
-                body={
-                    'privateKeyType':'TYPE_GOOGLE_CREDENTIALS_FILE',
-                    'keyAlgorithm':'KEY_ALG_RSA_2048'
-                }
-            ))
-        batch.execute()
-        for j in current_key_dump:
-            with open('%s/%s.json' % (path,j[0]),'w+') as f:
-                f.write(j[1])
-            # pbar.next()
-        # pbar.finish()
+        while current_key_dump is None or len(current_key_dump) != 100:
+            batch = iam.new_batch_http_request(callback=_batch_keys_resp)
+            total_sas = _list_sas(iam,i)
+            for j in total_sas:
+                batch.add(iam.projects().serviceAccounts().keys().create(
+                    name='projects/%s/serviceAccounts/%s' % (i,j['uniqueId']),
+                    body={
+                        'privateKeyType':'TYPE_GOOGLE_CREDENTIALS_FILE',
+                        'keyAlgorithm':'KEY_ALG_RSA_2048'
+                    }
+                ))
+            batch.execute()
+            if current_key_dump is None:
+                print('Redownloading keys from %s' % i)
+                current_key_dump = []
+            else:
+                for j in current_key_dump:
+                    with open('%s/%s.json' % (path,j[0]),'w+') as f:
+                        f.write(j[1])
+
+# Delete Service Accounts
+def _delete_sas(iam,project):
+    sas = _list_sas(iam,project)
+    batch = iam.new_batch_http_request(callback=_def_batch_resp)
+    for i in sas:
+        batch.add(iam.projects().serviceAccounts().delete(name=i['name']))
+    batch.execute()
 
 def serviceaccountfactory(
     credentials='credentials.json',
@@ -125,6 +143,7 @@ def serviceaccountfactory(
     enable_services=None,
     services=None,
     create_sas=None,
+    delete_sas=None,
     download_keys=None
     ):
     selected_projects = []
@@ -183,14 +202,14 @@ def serviceaccountfactory(
         print('Enabling services')
         _enable_services(serviceusage,ste,services)
     if create_sas:
+        stc = []
+        stc.append(create_sas)
         if create_sas == '~':
-            for i in selected_projects:
-                _create_remaining_accounts(iam,i)
+            stc = selected_projects
         elif create_sas == '*':
-            for i in _get_projects(cloud):
-                _create_remaining_accounts(iam,i)
-        else:
-            _create_remaining_accounts(iam,create_sas)
+            stc =  _get_projects(cloud)
+        for i in stc:
+            _create_remaining_accounts(iam,i)
     if download_keys:
         try:
             os.mkdir(path)
@@ -203,19 +222,29 @@ def serviceaccountfactory(
         elif download_keys == '*':
             std = _get_projects(cloud)
         _create_sa_keys(iam,std,path)
-
+    if delete_sas:
+        std = []
+        std.append(delete_sas)
+        if delete_sas == '~':
+            std = selected_projects
+        elif delete_sas == '*':
+            std = _get_projects(cloud)
+        for i in std:
+            print('Deleting service accounts in %s' % i)
+            _delete_sas(iam,i)
 
 if __name__ == '__main__':
     parse = argparse.ArgumentParser(description='A tool to create Google service accounts.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
     parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path.')
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
-    parse.add_argument('--list-projects',default=False,action='store_true',help='List projects managable by the user.')
+    parse.add_argument('--list-projects',default=False,action='store_true',help='List projects viewable by the user.')
     parse.add_argument('--list-sas',default=False,help='List service accounts in a project.')
     parse.add_argument('--create-projects',type=int,default=None,help='Creates up to N projects. Takes into account existing projects.')
     parse.add_argument('--enable-services',default=None,help='Enables services on the project. Default: IAM and Drive')
     parse.add_argument('--services',nargs='+',default=['iam','drive'],help='Specify a different set of services to enable. Overrides the default.')
     parse.add_argument('--create-sas',default=None,help='Create service accounts in a project.')
+    parse.add_argument('--delete-sas',default=None,help='Delete service accounts in a project.')
     parse.add_argument('--download-keys',default=None,help='Download keys for all the service accounts in a project.')
     parse.add_argument('--quick-setup',default=None,type=int,help='Create projects, enable services, create service accounts and download keys. ')
     parse.add_argument('--new-only',default=False,action='store_true',help='Do not use exisiting projects.')
@@ -237,18 +266,24 @@ if __name__ == '__main__':
         list_sas=args.list_sas,
         create_projects=args.create_projects,
         create_sas=args.create_sas,
+        delete_sas=args.delete_sas,
         enable_services=args.enable_services,
         services=args.services,
         download_keys=args.download_keys
     )
     if resp is not None:
         if args.list_projects:
-            print('Projects:')
-            for i in resp:
-                print('  ' + i)
+            if resp:
+                print('Projects:')
+                for i in resp:
+                    print('  ' + i)
+            else:
+                print('No projects.')
         elif args.list_sas:
-            print('Service accounts in %s:' % args.list_sas)
-            for i in resp:
-                print('  %s (%s)' % (i['email'],i['uniqueId']))
+            if resp:
+                print('Service accounts in %s:' % args.list_sas)
+                for i in resp:
+                    print('  %s (%s)' % (i['email'],i['uniqueId']))
+            else:
+                print('No service accounts.')
     print('Done.')
-    
