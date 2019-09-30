@@ -184,12 +184,12 @@ def serviceaccountfactory(
     if create_projects:
         if create_projects > 0:
             current_count = len(_get_projects(cloud))
-            if current_count < max_projects:
-                print('Creating %d projects' % (create_projects - current_count))
-                nprjs = _create_projects(cloud, create_projects - current_count)
+            if current_count + create_projects < max_projects:
+                print('Creating %d projects' % (create_projects))
+                nprjs = _create_projects(cloud, create_projects)
                 selected_projects = nprjs
             else:
-                print('%d projects or more already exist!' % current_count)
+                print('%d projects already exist!' % current_count)
         else:
             print('Please specify a number larger than 0.')
     if enable_services:
@@ -251,6 +251,29 @@ if __name__ == '__main__':
     parse.add_argument('--quick-setup',default=None,type=int,help='Create projects, enable services, create service accounts and download keys. ')
     parse.add_argument('--new-only',default=False,action='store_true',help='Do not use exisiting projects.')
     args = parse.parse_args()
+    # If credentials file is invalid, search for one.
+    if not os.path.exists(args.credentials):
+        options = glob.glob('*.json')
+        print('No credentials found at %s' % args.credentials)
+        if len(options) < 1:
+            exit(-1)
+        else:
+            i = 0
+            print('Select a credentials file below.')
+            inp_options = [str(i) for i in list(range(1,len(options) + 1))] + options
+            while i < len(options):
+                print('  %d) %s' % (i + 1,options[i]))
+                i += 1
+            inp = None
+            while True:
+                inp = input('> ')
+                if inp in inp_options:
+                    break
+            if inp in options:
+                args.credentials = inp
+            else:
+                args.credentials = options[int(inp) - 1]
+            print('Use --credentials %s next time to use this credentials file.' % args.credentials)
     if args.quick_setup:
         opt = '*'
         if args.new_only:
@@ -277,14 +300,14 @@ if __name__ == '__main__':
     if resp is not None:
         if args.list_projects:
             if resp:
-                print('Projects:')
+                print('Projects (%d):' % len(resp))
                 for i in resp:
                     print('  ' + i)
             else:
                 print('No projects.')
         elif args.list_sas:
             if resp:
-                print('Service accounts in %s:' % args.list_sas)
+                print('Service accounts in %s (%d):' % (args.list_sas,len(resp)))
                 for i in resp:
                     print('  %s (%s)' % (i['email'],i['uniqueId']))
             else:
