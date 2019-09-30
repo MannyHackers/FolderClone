@@ -2,19 +2,25 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-import base64, json, progress.bar, glob, sys, argparse, time, os, pickle, requests, random
+from argparse import ArgumentParser
+from base64 import b64decode
+from random import choice
+from json import loads
+from time import sleep
+from glob import glob
+import os,pickle 
 
-SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
+SCOPES = ['https://www.googleapis.com/auth/drive','https://www.googleapis.com/auth/cloud-platform','https://www.googleapis.com/auth/iam']
 project_create_ops = []
 current_key_dump = []
-sleep_time = 60
+sleep_time = 30
 
 # Create count SAs in project
 def _create_accounts(service,project,count):
     batch = service.new_batch_http_request(callback=_def_batch_resp)
     for i in range(count):
         aid = _generate_id('mfc-')
-        batch.add(service.projects().serviceAccounts().create(name="projects/" + project, body={ "accountId": aid, "serviceAccount": { "displayName": aid }}))
+        batch.add(service.projects().serviceAccounts().create(name='projects/' + project, body={ 'accountId': aid, 'serviceAccount': { 'displayName': aid }}))
     batch.execute()
 
 # Create accounts needed to fill project
@@ -28,7 +34,7 @@ def _create_remaining_accounts(iam,project):
 # Generate a random id
 def _generate_id(prefix='saf-'):
     chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
-    return prefix + ''.join(random.choice(chars) for _ in range(25)) + random.choice(chars[1:])
+    return prefix + ''.join(choice(chars) for _ in range(25)) + choice(chars[1:])
 
 # List projects using service
 def _get_projects(service):
@@ -38,7 +44,7 @@ def _get_projects(service):
 def _def_batch_resp(id,resp,exception):
     if exception is not None:
         if str(exception).startswith('<HttpError 429'):
-            time.sleep(0.2)
+            time.sleep(sleep_time/100)
         else:
             print(str(exception))
 
@@ -67,7 +73,7 @@ def _create_projects(cloud,count):
             resp = cloud.operations().get(name=i).execute()
             if 'done' in resp and resp['done']:
                 break
-            time.sleep(3)
+            sleep(3)
     return new_projs
 
 # Enable services ste for projects in projects
@@ -90,13 +96,13 @@ def _batch_keys_resp(id,resp,exception):
     global current_key_dump
     if exception is not None:
         current_key_dump = None
-        time.sleep(0.2)
+        sleep(sleep_time/100)
     elif current_key_dump is None:
-        time.sleep(0.2)
+        sleep(sleep_time/100)
     else:
         current_key_dump.append((
             resp['name'][resp['name'].rfind('/'):],
-            base64.b64decode(resp['privateKeyData']).decode('utf-8')
+            b64decode(resp['privateKeyData']).decode('utf-8')
         ))
 
 # Create Keys
@@ -140,14 +146,15 @@ def serviceaccountfactory(
     list_projects=False,
     list_sas=None,
     create_projects=None,
+    max_projects=12,
     enable_services=None,
-    services=None,
+    services=['iam','drive'],
     create_sas=None,
     delete_sas=None,
     download_keys=None
     ):
     selected_projects = []
-    proj_id = json.loads(open(credentials,'r').read())['installed']['project_id']
+    proj_id = loads(open(credentials,'r').read())['installed']['project_id']
     creds = None
     if os.path.exists(token):
         with open(token, 'rb') as t:
@@ -161,16 +168,16 @@ def serviceaccountfactory(
         with open(token, 'wb') as t:
             pickle.dump(creds, t)
 
-    cloud = build("cloudresourcemanager", "v1", credentials=creds)
-    iam = build("iam", "v1", credentials=creds)
-    serviceusage = build("serviceusage","v1",credentials=creds)
+    cloud = build('cloudresourcemanager', 'v1', credentials=creds)
+    iam = build('iam', 'v1', credentials=creds)
+    serviceusage = build('serviceusage','v1',credentials=creds)
 
     projs = None
     while projs == None:
         try:
             projs = _get_projects(cloud)
         except HttpError as e:
-            if json.loads(e.content.decode('utf-8'))['error']['status'] == 'PERMISSION_DENIED':
+            if loads(e.content.decode('utf-8'))['error']['status'] == 'PERMISSION_DENIED':
                 try:
                     serviceusage.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % proj_id).execute()
                 except HttpError as e:
@@ -183,12 +190,12 @@ def serviceaccountfactory(
     if create_projects:
         if create_projects > 0:
             current_count = len(_get_projects(cloud))
-            if current_count < create_projects:
-                print('Creating %d projects' % (create_projects - current_count))
-                nprjs = _create_projects(cloud, create_projects - current_count)
+            if current_count + create_projects < max_projects:
+                print('Creating %d projects' % (create_projects))
+                nprjs = _create_projects(cloud, create_projects)
                 selected_projects = nprjs
             else:
-                print('%d projects or more already exist!' % current_count)
+                print('%d projects already exist!' % current_count)
         else:
             print('Please specify a number larger than 0.')
     if enable_services:
@@ -234,13 +241,14 @@ def serviceaccountfactory(
             _delete_sas(iam,i)
 
 if __name__ == '__main__':
-    parse = argparse.ArgumentParser(description='A tool to create Google service accounts.')
+    parse = ArgumentParser(description='A tool to create Google service accounts.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternate directory to output the credential files.')
     parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path.')
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
     parse.add_argument('--list-projects',default=False,action='store_true',help='List projects viewable by the user.')
     parse.add_argument('--list-sas',default=False,help='List service accounts in a project.')
-    parse.add_argument('--create-projects',type=int,default=None,help='Creates up to N projects. Takes into account existing projects.')
+    parse.add_argument('--create-projects',type=int,default=None,help='Creates up to N projects.')
+    parse.add_argument('--max-projects',type=int,default=12,help='Max amount of project allowed. Default: 12')
     parse.add_argument('--enable-services',default=None,help='Enables services on the project. Default: IAM and Drive')
     parse.add_argument('--services',nargs='+',default=['iam','drive'],help='Specify a different set of services to enable. Overrides the default.')
     parse.add_argument('--create-sas',default=None,help='Create service accounts in a project.')
@@ -249,6 +257,29 @@ if __name__ == '__main__':
     parse.add_argument('--quick-setup',default=None,type=int,help='Create projects, enable services, create service accounts and download keys. ')
     parse.add_argument('--new-only',default=False,action='store_true',help='Do not use exisiting projects.')
     args = parse.parse_args()
+    # If credentials file is invalid, search for one.
+    if not os.path.exists(args.credentials):
+        options = glob('*.json')
+        print('No credentials found at %s' % args.credentials)
+        if len(options) < 1:
+            exit(-1)
+        else:
+            i = 0
+            print('Select a credentials file below.')
+            inp_options = [str(i) for i in list(range(1,len(options) + 1))] + options
+            while i < len(options):
+                print('  %d) %s' % (i + 1,options[i]))
+                i += 1
+            inp = None
+            while True:
+                inp = input('> ')
+                if inp in inp_options:
+                    break
+            if inp in options:
+                args.credentials = inp
+            else:
+                args.credentials = options[int(inp) - 1]
+            print('Use --credentials %s next time to use this credentials file.' % args.credentials)
     if args.quick_setup:
         opt = '*'
         if args.new_only:
@@ -265,6 +296,7 @@ if __name__ == '__main__':
         list_projects=args.list_projects,
         list_sas=args.list_sas,
         create_projects=args.create_projects,
+        max_projects=args.max_projects,
         create_sas=args.create_sas,
         delete_sas=args.delete_sas,
         enable_services=args.enable_services,
@@ -274,16 +306,15 @@ if __name__ == '__main__':
     if resp is not None:
         if args.list_projects:
             if resp:
-                print('Projects:')
+                print('Projects (%d):' % len(resp))
                 for i in resp:
                     print('  ' + i)
             else:
                 print('No projects.')
         elif args.list_sas:
             if resp:
-                print('Service accounts in %s:' % args.list_sas)
+                print('Service accounts in %s (%d):' % (args.list_sas,len(resp)))
                 for i in resp:
                     print('  %s (%s)' % (i['email'],i['uniqueId']))
             else:
                 print('No service accounts.')
-    print('Done.')

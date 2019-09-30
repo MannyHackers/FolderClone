@@ -2,7 +2,10 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.errors import HttpError
 from urllib3.exceptions import ProtocolError
 from googleapiclient.discovery import build
-import progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
+from argparse import ArgumentParser
+from httplib2shim import patch
+from glob import glob
+import time,threading,json,socket
 
 account_count = 0
 dtu = 1
@@ -27,7 +30,7 @@ error_codes = {
     'notFound': False
 }
 
-httplib2shim.patch()
+patch()
 
 def log(*l):
     global debug
@@ -226,47 +229,48 @@ def rcopy(drive, dtu, source, dest, sname, pre, width):
         s += 1
     return drive
 
-def multifolderclone(source=None, dest=None, path='accounts', width=2):
+def multifolderclone(source=None, dest=None, path='accounts', width=2, thread_count=None):
     global account_count
     global drive
     global threads
 
     stt = time.time()
-    accounts = glob.glob(path + '/*.json')
+    accounts = glob(path + '/*.json')
 
     check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
     try:
         root_dir = check.files().get(fileId=source, supportsAllDrives=True).execute()['name']
     except HttpError:
         print('Source folder cannot be read or is invalid.')
-        sys.exit(0)
+        exit(0)
     try:
         dest_dir = check.files().get(fileId=dest, supportsAllDrives=True).execute()['name']
     except HttpError:
         print('Destination folder cannot be read or is invalid.')
-        sys.exit(0)
+        exit(0)
 
     print('Copy from ' + root_dir + ' to ' + dest_dir + '.')
     print('View set to tree (' + str(width) + ').')
-    pbar = progress.bar.Bar("Creating Drive Services", max=len(accounts))
 
+    print("Creating %d Drive Services" % len(accounts))
     for account in accounts:
         account_count += 1
         credentials = Credentials.from_service_account_file(account, scopes=[
             "https://www.googleapis.com/auth/drive"
         ])
         drive.append(build("drive", "v3", credentials=credentials))
-        pbar.next()
-    pbar.finish()
+    if thread_count is not None and thread_count <= account_count:
+        threads = threading.BoundedSemaphore(thread_count)
+    else:
+        threads = threading.BoundedSemaphore(account_count)
 
-    threads = threading.BoundedSemaphore(account_count)
     print('BoundedSemaphore with %d threads' % account_count)
 
     try:
-        rcopy(drive, 1, source, dest, "root", "", width)
+        rcopy(drive, 1, source, dest, root_dir, "", width)
     except KeyboardInterrupt:
         print('Quitting')
-        sys.exit()
+        exit(0)
 
     print('Complete.')
     hours, rem = divmod((time.time() - stt), 3600)
@@ -275,20 +279,22 @@ def multifolderclone(source=None, dest=None, path='accounts', width=2):
 
 def main():
     global debug
-    parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
-    parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
+    parse = ArgumentParser(description='A tool intended to copy large files from one folder to another.')
+    parse.add_argument('--width', '-w', type=int, default=2, help='Set the width of the view option.')
     parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
     parse.add_argument('--debug-mode',default=False,action='store_true',help='Completely verbose.')
+    parse.add_argument('--threads', type=int, default=None,help='Specify a different thread count. Cannot be greater than the amount of service accounts available.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
     parsereq.add_argument('--destination-id', '-d',help='The destination ID of the folder to copy to.',required=True)
     args = parse.parse_args()
     debug = args.debug_mode
     multifolderclone(
-        args.source_id,
-        args.destination_id,
-        args.path,
-        args.width
+        source=args.source_id,
+        dest=args.destination_id,
+        path=args.path,
+        width=args.width,
+        thread_count=args.threads
     )
 
 if __name__ == '__main__':
