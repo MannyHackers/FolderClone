@@ -188,7 +188,7 @@ def serviceaccountfactory(
                 print('Creating %d projects' % (create_projects - current_count))
                 nprjs = _create_projects(cloud, create_projects - current_count)
                 selected_projects = nprjs
-            elif:
+            else:
                 print('%d projects or more already exist!' % current_count)
         else:
             print('Please specify a number larger than 0.')
