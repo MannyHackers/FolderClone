@@ -1,4 +1,4 @@
-Steps on how to use multifolderclone.py
+Steps on how to use `multifolderclone.py`
 =================================
 
 Steps to setup `multifactory.py`
@@ -11,10 +11,11 @@ Steps to setup `multifactory.py`
 6) Find out how many projects you'll need. For example, a 100 TB job will take approximately 135 service accounts to make a full clone. Each project can have a maximum of 100 service accounts. In the case of the 100TB job, we will need 2 projects. `multifactory.py` conveniently includes a quick setup option. Run the following command `python3 multifactory.py --quick-setup N`. **Replace `N` with the amount of projects you need!**. It will automatically start doing all the hard work for you.
 6a) Running this for the first time will prompt you to login with your Google account. Login with the same account you used for Step 1. If will then ask you to enable a service. Open the URL in your browser to enable it. Press Enter once it's enabled.
 
-Steps to add all the SAs to the Shared Drive
+Steps to add all the service accounts to the Shared Drive
 ---------------------------------
 1) Once `multifactory.py` is done making all the accounts, open Google Drive and make a new Shared Drive to copy to.
 2) Run the following command `python3 masshare.py -d SDFolderID`. Replace the `SDFolderID` with `XXXXXXXXXXXXXXXXXXX`. The Folder ID can be obtained from the Shared Drive URL `https://drive.google.com/drive/folders/XXXXXXXXXXXXXXXXXXX`. `masshare.py` will start adding all your service accounts.
+
 **Shared Drives can only fit up to 600 users!**
 
 Steps to clone a public folder to the Shared Drive
@@ -24,6 +25,5 @@ Steps to clone a public folder to the Shared Drive
 Steps to *sync* a public folder to the Shared Drive
 ---------------------------------
 `multifolderclone.py` will now know if something's been copied already! Run the command again to copy over any new or missing files. *`multifolderclone.py` will not delete any files in the destination **not** in the source*
-
 
 ### As always, use the [Issues](https://github.com/Spazzlo/folderclone/issues) tab for any bugs, issues, feature requests or documentation improvements.
