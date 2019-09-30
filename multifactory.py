@@ -140,8 +140,9 @@ def serviceaccountfactory(
     list_projects=False,
     list_sas=None,
     create_projects=None,
+    max_projects=12,
     enable_services=None,
-    services=None,
+    services=['iam','drive'],
     create_sas=None,
     delete_sas=None,
     download_keys=None
@@ -183,11 +184,11 @@ def serviceaccountfactory(
     if create_projects:
         if create_projects > 0:
             current_count = len(_get_projects(cloud))
-            if current_count < create_projects:
+            if current_count < max_projects:
                 print('Creating %d projects' % (create_projects - current_count))
                 nprjs = _create_projects(cloud, create_projects - current_count)
                 selected_projects = nprjs
-            else:
+            elif:
                 print('%d projects or more already exist!' % current_count)
         else:
             print('Please specify a number larger than 0.')
@@ -240,7 +241,8 @@ if __name__ == '__main__':
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
     parse.add_argument('--list-projects',default=False,action='store_true',help='List projects viewable by the user.')
     parse.add_argument('--list-sas',default=False,help='List service accounts in a project.')
-    parse.add_argument('--create-projects',type=int,default=None,help='Creates up to N projects. Takes into account existing projects.')
+    parse.add_argument('--create-projects',type=int,default=None,help='Creates up to N projects.')
+    parse.add_argument('--max-projects',type=int,default=12,help='Max amount of project allowed. Default: 12')
     parse.add_argument('--enable-services',default=None,help='Enables services on the project. Default: IAM and Drive')
     parse.add_argument('--services',nargs='+',default=['iam','drive'],help='Specify a different set of services to enable. Overrides the default.')
     parse.add_argument('--create-sas',default=None,help='Create service accounts in a project.')
@@ -265,6 +267,7 @@ if __name__ == '__main__':
         list_projects=args.list_projects,
         list_sas=args.list_sas,
         create_projects=args.create_projects,
+        max_projects=args.max_projects,
         create_sas=args.create_sas,
         delete_sas=args.delete_sas,
         enable_services=args.enable_services,
