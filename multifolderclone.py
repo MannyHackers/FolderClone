@@ -1,110 +1,237 @@
-from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError
 from google.oauth2.service_account import Credentials
-from itertools import islice
-import socket
-import time, glob, sys, argparse, httplib2shim, threading, progressbar
+from googleapiclient.errors import HttpError
+from urllib3.exceptions import ProtocolError
+from googleapiclient.discovery import build
+import progress.bar, time, threading, httplib2shim, glob, sys, argparse, socket, json
 
-socket.setdefaulttimeout(200)
+account_count = 0
+dtu = 1
+retry = []
+drive = []
 threads = None
-pbar = None
-errd = {}
-jobs = {}
+bad_drives = []
+
+error_codes = {
+    'dailyLimitExceeded': True,
+    'userRateLimitExceeded': True,
+    'rateLimitExceeded': True,
+    'sharingRateLimitExceeded': True,
+    'appNotAuthorizedToFile': True,
+    'insufficientFilePermissions': True,
+    'domainPolicy': True,
+    'backendError': True,
+    'internalError': True,
+    'badRequest': False,
+    'invalidSharingRequest': False,
+    'authError': False,
+    'notFound': False
+}
+
 httplib2shim.patch()
 
-def _chunks(job_dict,size):
-    it = iter(job_dict)
-    for i in range(0,len(job_dict),size):
-        yield {k:job_dict[k] for k in islice(it,size)}
+def log(*l):
+    global debug
+    if debug:
+        for i in l:
+            print(i)
 
-def _ls(parent, searchTerms, drive):
+def apicall(request,sleep_time=1,max_retries=3):
+    global error_codes
+    
+    resp = None
+    tries = 0
+
     while True:
+        tries += 1
+        if tries > max_retries:
+            return None
         try:
-            files = []
-            resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True).execute()
-            files += resp["files"]
-            while "nextPageToken" in resp:
-                resp = drive.files().list(q="'%s' in parents %s and trashed=false" % (parent,searchTerms), pageSize=1000, supportsAllDrives=True, includeItemsFromAllDrives=True, pageToken=resp["nextPageToken"]).execute()
-                files += resp["files"]
-            return files
-        except Exception as e:
-            time.sleep(3)
+            resp = request.execute()
+            if tries > 1:
+                log('Successfully retried')
+        except HttpError as error:
+            log(error)
+            try:
+                error_details = json.loads(error.content.decode("utf-8"))
+            except json.decoder.JSONDecodeError:
+                time.sleep(sleep_time)
+                continue
+            reason = error_details["error"]["errors"][0]["reason"]
+            if reason == 'userRateLimitExceeded':
+                return False
+            elif error_codes[reason]:
+                time.sleep(sleep_time)
+                continue
+            else:
+                return None
+        except (socket.error, ProtocolError):
+            time.sleep(sleep_time)
+            continue
+        else:
+            return resp
 
-def _lsd(parent, drive):
+def ls(parent, searchTerms=""):
+    files = []
     
-    return _ls(parent, "and mimeType contains 'application/vnd.google-apps.folder'", drive)
+    resp = apicall(
+        drive[0].files().list(
+            q="'" + parent + "' in parents" + searchTerms,
+            fields='files(md5Checksum,id,name),nextPageToken',
+            pageSize=1000,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        )
+    )
+    files += resp["files"]
 
-def _lsf(parent, drive):
-    
-    return _ls(parent, "and not mimeType contains 'application/vnd.google-apps.folder'", drive)
+    while "nextPageToken" in resp:
+        resp = apicall(
+            drive[0].files().list(
+                q="'" + parent + "' in parents" + searchTerms,
+                fields='files(md5Checksum,id,name),nextPageToken',
+                pageSize=1000,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+                pageToken=resp["nextPageToken"]
+            )
+        )
+        files += resp["files"]
+    return files
 
-def _rebuild_dirs(source, dest, drive):
-    global jobs
-    global pbar
-    
-    for file in _lsf(source,drive):
-        jobs[file['id']] = dest
-        pbar.update()
+def lsd(parent):
+    return ls(
+        parent,
+        searchTerms=" and mimeType contains 'application/vnd.google-apps.folder'"
+    )
 
-    folderstocopy = _lsd(source, drive)
-    for i in folderstocopy:
-        resp = drive.files().create(body={
-            "name": i["name"],
-            "mimeType": "application/vnd.google-apps.folder",
-            "parents": [dest]
-        }, supportsAllDrives=True).execute()
-        _rebuild_dirs(i["id"], resp["id"], drive)
+def lsf(parent):
+    return ls(
+        parent,
+        searchTerms=" and not mimeType contains 'application/vnd.google-apps.folder'"
+    )
 
-def _batch_response(id,resp,exception):
-    global errd
-    global jobs
-    if exception is not None:
-        noslash = str(exception).split('/')
-        errd[noslash[6]] = jobs[noslash[6]]
-
-def _copy(drive, batch):
-    global threads
-
-    batch_copy = drive.new_batch_http_request(callback=_batch_response)
-    for job in batch:
-        batch_copy.add(drive.files().copy(fileId=job, body={"parents": [batch[job]]}, supportsAllDrives=True))
-    batch_copy.execute()
+def copy(driv, source, dest):
+    global bad_drives
+    global retry
+    if apicall(driv.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True)) == False:
+        bad_drives.append(driv)
+        retry.append((source,dest))
     threads.release()
 
-def _rcopy(drives,batch_size,thread_count, selected_drive=0):
-    global jobs
+def rcopy(drive, dtu, source, dest, sname, pre, width):
+    global threads
+    global retry
+    global bad_drives
+
+    pres = pre
+    files_source = lsf(source)
+    files_dest = lsf(dest)
+    folders_source = lsd(source)
+    folders_dest = lsd(dest)
+    files_to_copy = []
+    files_source_id = []
+    files_dest_id = []
+
+    fs = len(folders_source) - 1
+
+    folders_copied = {}
+    for file in files_source:
+        files_source_id.append(dict(file))
+        file.pop('id')
+    for file in files_dest:
+        files_dest_id.append(dict(file))
+        file.pop('id')
+
+    i = 0
+    while len(files_source) > i:
+        if files_source[i] not in files_dest:
+            files_to_copy.append(files_source_id[i])
+        i += 1
+    for i in retry:
+        threads.acquire()
+        thread = threading.Thread(
+            target=copy,
+            args=(
+                drive[dtu],
+                i[0],
+                i[1]
+            )
+        )
+        thread.start()
+        dtu += 1
+        if dtu > len(drive) - 1:
+            dtu = 1
+    retry = []
+    if len(files_to_copy) > 0:
+        for file in files_to_copy:
+            threads.acquire()
+            thread = threading.Thread(
+                target=copy,
+                args=(
+                    drive[dtu],
+                    file['id'],
+                    dest
+                )
+            )
+            thread.start()
+            dtu += 1
+            if dtu > len(drive) - 1:
+                dtu = 1
+        print(pres + sname + ' | Synced')
+    elif len(files_source) > 0 and len(files_source) <= len(files_dest):
+        print(pres + sname + ' | Up to date')
+    else:
+        print(pres + sname)
+    log(len(bad_drives),bad_drives)
+    log(len(drive))
+    for i in bad_drives:
+        if i in drive:
+            drive.remove(i)
+    bad_drives = []
+    if len(drive) == 1:
+        print('Out of SAs.')
+        return
+
+    for i in folders_dest:
+        folders_copied[i['name']] = i['id']
+    
+    s = 0
+    for folder in folders_source:
+        if s == fs:
+            nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
+        else:
+            nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "├" + "─" * width + " "
+        if folder['name'] not in folders_copied.keys():
+            folder_id = apicall(
+                drive[0].files().create(
+                    body={
+                        "name": folder["name"],
+                        "mimeType": "application/vnd.google-apps.folder",
+                        "parents": [dest]
+                    },
+                    supportsAllDrives=True
+                )
+            )['id']
+        else:
+            folder_id = folders_copied[folder['name']]
+        drive = rcopy(
+            drive,
+            dtu,
+            folder["id"],
+            folder_id,
+            folder["name"].replace('%', "%%"),
+            nstu,
+            width
+        )
+        s += 1
+    return drive
+
+def multifolderclone(source=None, dest=None, path='accounts', width=2):
+    global account_count
+    global drive
     global threads
 
-    total_drives = len(drives)
-    selected_drive = 0
-
-    final = []
-    for i in _chunks(jobs,batch_size):
-        final.append(i)
-
-    threads = threading.BoundedSemaphore(thread_count)
-
-    pbar = progressbar.ProgressBar(max_value=len(jobs))
-    files_copied = 0
-    for batch in final:
-        threads.acquire()
-        thread = threading.Thread(target=_copy,args=(drives[selected_drive],batch))
-        thread.start()
-        files_copied += len(batch)
-        pbar.update(files_copied)
-        selected_drive += 1
-        if selected_drive == total_drives - 1:
-            selected_drive = 0
-    pbar.finish()
-    print('\nFinishing...')
-    while threading.active_count() != 1:
-        time.sleep(1)
-    return selected_drive + 1
-
-def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread_count=50):
-    global jobs
-    global errd
-
+    stt = time.time()
     accounts = glob.glob(path + '/*.json')
 
     check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
@@ -119,44 +246,51 @@ def multifolderclone(source=None,dest=None,path='accounts',batch_size=100,thread
         print('Destination folder cannot be read or is invalid.')
         sys.exit(0)
 
-    drives = []
-    print('Creating Drive Services')
-    for account in progressbar.progressbar(accounts):
+    print('Copy from ' + root_dir + ' to ' + dest_dir + '.')
+    print('View set to tree (' + str(width) + ').')
+    pbar = progress.bar.Bar("Creating Drive Services", max=len(accounts))
+
+    for account in accounts:
+        account_count += 1
         credentials = Credentials.from_service_account_file(account, scopes=[
             "https://www.googleapis.com/auth/drive"
         ])
-        drives.append(build("drive", "v3", credentials=credentials))
-
-    print('Rebuilding Folder Hierarchy: %s to %s' % (root_dir,dest_dir))
-    global pbar
-    pbar = progressbar.ProgressBar(widgets=[progressbar.Timer()]).start()
-    _rebuild_dirs(source, dest, drives[0])
+        drive.append(build("drive", "v3", credentials=credentials))
+        pbar.next()
     pbar.finish()
-    
-    print('Copying Files: %s to %s' % (root_dir,dest_dir))
-    finat = _rcopy(drives,batch_size,thread_count)
-    while len(errd) > 0:
-        print('Dropped %d files...\nRetrying' % len(errd))
-        jobs = errd
-        errd = {}
-        finat = _rcopy(drives,batch_size,thread_count,finat)
 
-if __name__ == '__main__':
+    threads = threading.BoundedSemaphore(account_count)
+    print('BoundedSemaphore with %d threads' % account_count)
+
+    try:
+        rcopy(drive, 1, source, dest, "root", "", width)
+    except KeyboardInterrupt:
+        print('Quitting')
+        sys.exit()
+
+    print('Complete.')
+    hours, rem = divmod((time.time() - stt), 3600)
+    minutes, sec = divmod(rem, 60)
+    print("Elapsed Time:\n{:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), sec))
+
+def main():
+    global debug
     parse = argparse.ArgumentParser(description='A tool intended to copy large files from one folder to another.')
-    parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts.')
-    parse.add_argument('--threads',default=50,help='Specify the amount of threads to use. USE AT YOUR OWN RISK.')
-    parse.add_argument('--batch-size',default=100,help='Specify how large the batch requests should be. USE AT YOUR OWN RISK.')
+    parse.add_argument('--width', '-w', default=2, help='Set the width of the view option.')
+    parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
+    parse.add_argument('--debug-mode',default=False,action='store_true',help='Completely verbose.')
     parsereq = parse.add_argument_group('required arguments')
-    parsereq.add_argument('--source-id','-s',help='The source ID of the folder to copy.',required=True)
-    parsereq.add_argument('--destination-id','-d',help='The destination ID of the folder to copy to.',required=True)
+    parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
+    parsereq.add_argument('--destination-id', '-d',help='The destination ID of the folder to copy to.',required=True)
     args = parse.parse_args()
-
-    print('Copy from %s to %s.' % (args.source_id,args.destination_id))
-
+    debug = args.debug_mode
     multifolderclone(
         args.source_id,
         args.destination_id,
         args.path,
-        args.batch_size,
-        args.threads
+        args.width
     )
+
+if __name__ == '__main__':
+    main()
+    
