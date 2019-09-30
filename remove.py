@@ -2,9 +2,9 @@ from google.oauth2.service_account import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from argparse import ArgumentParser
 from os.path import exists
-from sys import exit
-import argparse, pickle
+import pickle
 
 to_be_removed = []
 def _is_success(id,resp,exception):
@@ -47,7 +47,7 @@ def remove(drive_id=None,token='token.pickle',credentials='credentials.json',suf
             role = role.lower()
         else:
             print('Invalid role.')
-            exit(0)
+            exit(-1)
 
     print('Getting permissions')
 
@@ -84,7 +84,7 @@ def remove(drive_id=None,token='token.pickle',credentials='credentials.json',suf
     print('Users removed.')
 
 if __name__ == '__main__':
-    parse = argparse.ArgumentParser(description='A tool to remove users from a Shared Drive.')
+    parse = ArgumentParser(description='A tool to remove users from a Shared Drive.')
     parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path.')
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
     oft = parse.add_mutually_exclusive_group(required=True)
