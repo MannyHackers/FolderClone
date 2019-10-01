@@ -4,7 +4,7 @@ folderclone - A project which allows you copy public folders to a Shared Drive u
 Requirements for using the scripts
 ---------------------------------
 * Python 3.4+ (Use 64-Bit Python only)
-* The following modules from pip3: `google-api-python-client`, `progress`, `progressbar2` & `httplib2shim`
+* The following modules from pip3: `google-api-python-client`, `progress`, `progressbar2` , `httplib2shim`, & `google-auth-oauthlib`
 
 Short descriptions for each script
 ---------------------------------
