@@ -1,4 +1,4 @@
-folderclone - A project which allows you copy public folders to a Shared Drive using Google Service Accounts from GSuite Business or GSuite Education accounts.
+folderclone - A project that allows you copy large folders to Shared Drives. 
 =================================
 
 Requirements for using the scripts
