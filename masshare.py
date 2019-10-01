@@ -2,8 +2,11 @@ from google.oauth2.service_account import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from argparse import ArgumentParser
 from os.path import exists
-import json, glob, argparse, pickle
+from json import loads
+from glob import glob
+import pickle
 
 successful = []
 
@@ -37,8 +40,8 @@ def masshare(drive_id=None,path='accounts',token='token.pickle',credentials='cre
     accounts_to_add = []
 
     print('Fetching emails')
-    for i in glob.glob('%s/*.json' % path):
-        accounts_to_add.append(json.loads(open(i,'r').read())['client_email'])
+    for i in glob('%s/*.json' % path):
+        accounts_to_add.append(loads(open(i,'r').read())['client_email'])
 
     while len(successful) < len(accounts_to_add):
         print('Preparing %d members' % (len(accounts_to_add) - len(successful)))
@@ -54,7 +57,7 @@ def masshare(drive_id=None,path='accounts',token='token.pickle',credentials='cre
         batch.execute()
 
 if __name__ == '__main__':
-    parse = argparse.ArgumentParser(description='A tool to add service accounts to a shared drive from a folder containing credential files.')
+    parse = ArgumentParser(description='A tool to add service accounts to a shared drive from a folder containing credential files.')
     parse.add_argument('--path','-p',default='accounts',help='Specify an alternative path to the service accounts folder.')
     parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path.')
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path.')
