@@ -44,7 +44,7 @@ def _get_projects(service):
 def _def_batch_resp(id,resp,exception):
     if exception is not None:
         if str(exception).startswith('<HttpError 429'):
-            time.sleep(sleep_time/100)
+            sleep(sleep_time/100)
         else:
             print(str(exception))
 
