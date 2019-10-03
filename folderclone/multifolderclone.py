@@ -242,6 +242,8 @@ class multifolderclone():
 
     def clone(self):
         accounts = glob(self.path + '/*.json')
+        if len(accounts) < 2:
+            raise ValueError('The path provided (%s) has 1 or less accounts.' % self.path)
 
         check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
 
