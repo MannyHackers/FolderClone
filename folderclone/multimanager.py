@@ -15,7 +15,6 @@ from sys import exit
 import pickle 
 
 class multimanager():
-    services = ['iam','drive']
     credentials = 'credentials.json'
     token = 'token.pickle'
     drive_service = None
@@ -72,8 +71,6 @@ class multimanager():
             self.sleep_time = int(options['sleep_time'])
         if options.get('max_projects') is not None:
             self.max_projects = int(options['max_projects'])
-        if options.get('services') is not None:
-            self.services = list(options['services'])
 
     def create_shared_drive(self,name):
         return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
@@ -157,7 +154,7 @@ class multimanager():
                 b64decode(resp['privateKeyData']).decode('utf-8')
             ))
 
-    def enable_services(self,projects,services=services):
+    def enable_services(self,projects,services=['iam','drive']):
         services = [i + '.googleapis.com' for i in services]
         batch = self.usage_service.new_batch_http_request(callback=self._default_batch_resp)
         for i in projects:
