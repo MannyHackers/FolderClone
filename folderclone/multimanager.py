@@ -6,10 +6,12 @@ from argparse import ArgumentParser
 from base64 import b64decode
 from os.path import exists
 from random import choice
+from os import rename
 from json import loads
 from time import sleep
 from uuid import uuid4
 from glob import glob
+from sys import exit
 import pickle 
 
 class multimanager():
@@ -189,16 +191,10 @@ class multimanager():
         else:
             print(str(exception))
 
-    def share_to(self,drive_id,path='accounts',emails=None):
-        accounts_to_add = []
-        if emails is not None:
-            accounts_to_add = emails
-        else:
-            for i in glob('%s/*.json' % path):
-                accounts_to_add.append(loads(open(i,'r').read())['client_email'])
-        while len(self.successful) < len(accounts_to_add):
+    def add_users(self,drive_id,emails):
+        while len(self.successful) < len(emails):
             batch = self.drive_service.new_batch_http_request(callback=self._share_success)
-            for i in accounts_to_add:
+            for i in emails:
                 if i not in self.successful:
                     batch.add(self.drive_service.permissions().create(fileId=drive_id, fields='emailAddress', supportsAllDrives=True, body={
                         "role": "fileOrganizer",
@@ -217,25 +213,22 @@ class multimanager():
         else:
             print(str(exception))
 
-    def remove(drive_id,path=None,role=None,prefix=None,suffix=None):
-        if path is None and role is None and prefix is None and suffix is None:
-            raise ValueError('You must provide at least one of the four options: path, role, prefix, suffix')
+    def remove_users(drive_id,emails=None,role=None,prefix=None,suffix=None):
+        if emails is None and role is None and prefix is None and suffix is None:
+            raise ValueError('You must provide one of three options: role, prefix, suffix')
         all_perms = []
         rp = self.drive_service.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True).execute()
         all_perms += rp['permissions']
         while 'nextPageToken' in rp:
             rp = self.drive_service.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True,pageToken=rp['nextPageToken']).execute()
             all_perms += rp['permissions']
-        if path:
-            accounts_in_path = []
-            for i in glob('%s/*.json' % path):
-                accounts_in_path.append(loads(open(i,'r').read())['client_email'])
-            for i in accounts_to_add:
-                if i in [i['emailAddress'] for i in all_perms]:
-                    self.to_be_removed.append(i)
+
         else:
             for i in all_perms:
-                if role:
+                if emails:
+                    if i['emailAddress'] in emails:
+                        self.to_be_removed.append(i['id'])
+                elif role:
                     if role == i['role'].lower():
                         self.to_be_removed.append(i['id'])
                 elif prefix:
@@ -252,3 +245,122 @@ class multimanager():
             for i in self.to_be_removed:
                 batch.add(self.drive_service.permissions().delete(fileId=drive_id,permissionId=i,supportsAllDrives=True))
             batch.execute()
+
+if __name__ == '__main__':
+    parse = ArgumentParser(description='A tool to create Google service accounts.')
+    parse.add_argument('--path',default='accounts',help='Specify an alternate directory to output the credential files. Default: accounts')
+    parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path. Default: token.pickle')
+    parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path. Default: credentials.json')
+    parse.add_argument('--max-projects',type=int,default=12,help='Max amount of project allowed. Default: 12')
+    parse.add_argument('--sleep',default=30,type=int,help='The amound of seconds to sleep between errors. Default: 30')
+    parse.add_argument('--services',nargs='+',default=['iam','drive'],help='Overrides the services to enable. Default: IAM and Drive.')
+    parse.add_argument('--remove',default=None,help='Removes users from a Shared Drive..')
+    parse.add_argument('-d','--drive-id',default=None,type=str,help='The ID of the Shared Drive.')
+    parse.add_argument('--quick-setup',default=None,type=int,help='Create projects, enable services, create service accounts and download keys. ')
+    args = parse.parse_args()
+    # If no credentials file, search for one.
+    if not exists(args.credentials):
+        options = glob('*.json')
+        print('No credentials found at %s' % args.credentials)
+        if len(options) < 1:
+            exit(-1)
+        else:
+            i = 0
+            print('Select a credentials file below.')
+            inp_options = [str(i) for i in list(range(1,len(options) + 1))] + options
+            while i < len(options):
+                print('  %d) %s' % (i + 1,options[i]))
+                i += 1
+            inp = None
+            while True:
+                inp = input('> ')
+                if inp in inp_options:
+                    break
+            if inp in options:
+                args.credentials = inp
+            else:
+                args.credentials = options[int(inp) - 1]
+            if bool(input('Rename %s to credentials.json?')):
+                rename(args.credentials,'credentials.json')
+                args.credentials = 'credentials.json'
+            else:
+                print('Use --credentials %s next time to use this credentials file.' % args.credentials)
+
+    # new mg instance
+    mg = multimanager(
+        token=args.token,
+        credentials=args.credentials,
+        max_projects=args.max_projects,
+        sleep_time=args.sleep
+        )
+
+    # first time setup?
+    projs = None
+    retries = 0
+    proj_id = loads(open(args.credentials,'r').read())['installed']['project_id']
+    while projs == None:
+        if retries > 2:
+            print('Could not use Cloud Resource Manager API.')
+            exit(-1)
+        retries += 1
+        try:
+            projs = mg.list_projects()
+        except HttpError as e:
+            if loads(e.content.decode('utf-8'))['error']['status'] == 'PERMISSION_DENIED':
+                try:
+                    mg.enable_services(proj_id,'cloudresourcemanager')
+                except HttpError as e:
+                    print(e._get_reason())
+                    input('Press Enter to retry.')
+            else:
+                print(e)
+                print('Report this issue on https://github.com/Spazzlo/folderclone/issues')
+
+    # quick setup
+    try:
+        if args.remove:
+            assert args.drive_id is not None, 'drive-id is required.'
+            opts = args.remove.split('=')
+            if opts[0] == 'path':
+                accounts_tr = []
+                for i in glob('%s/*.json' % opts[1]):
+                    accounts_tr.append(loads(open(i,'r').read())['client_email'])
+                mg.remove_users(drive_id,emails=accounts_tr)
+            elif opts[0] == 'role':
+                valid_roles = ['owner','organizer','fileorganizer','writer','reader','commenter']
+                valid_levels = ['owner','manager','content manager','contributor','viewer','commenter']
+                if opts[1].lower() in valid_levels:
+                    opts[1] = valid_roles[valid_levels.index(opts[1].lower())]
+                elif opts[1].lower() in valid_roles:
+                    opts[1] = opts[1].lower()
+                else:
+                    print('Invalid role.')
+                    exit(-1)
+                mg.remove_users(drive_id,role=opts[1])
+            elif opts[0] == 'prefix':
+                mg.remove_users(drive_id,prefix=opts[1])
+            elif opts[0] == 'suffix':
+                mg.remove_users(drive_id,suffix=opts[1])
+            else:
+                print('Invalid input.')
+
+        elif args.quick_setup:
+            assert args.drive_id is not None, 'drive_id is required.'
+            print('Creating %d projects.' % args.quick_setup)
+            projs = mg.create_projects(args.quick_setup)
+            print('Enabling services.')
+            mg.enable_services(projs,args.services)
+            for i in projs:
+                print('%s: Creating service accounts.' % i)
+                mg.create_service_accounts(i)
+                print('%s: Downloading keys.' % i)
+                mg.create_service_account_keys(i,path=args.path)
+            accounts_to_add = []
+            for i in glob('%s/*.json' % args.path):
+                accounts_to_add.append(loads(open(i,'r').read())['client_email'])
+            mg.add_users(args.drive_id,accounts_to_add)
+            print('Done.')
+        else:
+            print('Nothing to do.')
+    except Exception as e:
+        print(e)
