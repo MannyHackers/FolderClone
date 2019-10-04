@@ -40,6 +40,8 @@ class multifolderclone():
     }
 
     def __init__(self,source,dest,**options):
+        """
+        """
         self.source = source
         self.dest = dest
         if type(dest) is str:
@@ -79,6 +81,8 @@ class multifolderclone():
                 elif reason == 'storageQuotaExceeded':
                     print('Got storageQuotaExceeded error. You are not using a Shared Drive.')
                     return False
+                elif reason == 'teamDriveFileLimitExceeded':
+                    raise RuntimeError('The Shared Drive is full. No more files can be copied to it.')
                 elif self.error_codes[reason]:
                     time.sleep(self.sleep_time)
                     continue
