@@ -1,25 +1,25 @@
-import json
-from os import mkdir, path
+from google_auth_oauthlib.flow import InstalledAppFlow
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from os import mkdir,path
+import json
 
-def get_cred(path):
+def get_cred(credentials,token):
     SCOPES = ['https://www.googleapis.com/auth/drive']
     creds = None
 
-    if path.exists(path + 'token.json'):
-        with open(path + 'token.json', 'r') as token:
-            creds = json_to_cred(token)
+    if path.exists(token):
+        with open(token, 'r') as t:
+            creds = json_to_cred(t)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                path + 'credentials.json', SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(credentials, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open(path + 'token.json', 'w') as token:
-            json.dump(cred_to_json(creds), token, sort_keys=True, indent=4)
+        with open(token, 'w') as t:
+            json.dump(cred_to_json(creds),token,sort_keys=True,indent=2)
+
     return creds
 
 def cred_to_json(cred_to_pass):
