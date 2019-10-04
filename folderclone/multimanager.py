@@ -12,7 +12,7 @@ from time import sleep
 from uuid import uuid4
 from glob import glob
 from sys import exit
-import pickle 
+import pickle
 
 class multimanager():
     credentials = 'credentials.json'
@@ -29,6 +29,17 @@ class multimanager():
     to_be_removed = []
     sleep_time = 30
     def _build_service(self,service,v):
+        """Builds a new service.
+
+        Given api service and version v, builds and returns a new service.
+
+        Parameters:
+            service (str): The API service name.
+            v (str): The API version.
+
+        Returns:
+            Resource: The service used to interact with the API.
+        """
         SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
         if self.creds == None:
             if exists(self.token):
@@ -47,6 +58,18 @@ class multimanager():
         return build(service, v, credentials=self.creds)
 
     def __init__(self,**options):
+        """Creates a new multimanager object.
+
+        Optional Parameters:
+            credentials (str): The path for the credentials file. (default credentials.json)
+            token (str): The path for the token file. (default token.pickle)
+            sleep_time (int): The amound of seconds to sleep between errors. (default 30)
+            max_projects (int): Max amount of project allowed. (default 12)
+            usage_service: A Service Usage service
+            iam_service: An IAM service.
+            drive_service: A Drive service.
+            cloud_service: A Cloud Resource Manager service.
+        """
         if options.get('credentials') is not None:
             self.credentials = str(options['credentials'])
         if options.get('token') is not None:
@@ -73,6 +96,13 @@ class multimanager():
             self.max_projects = int(options['max_projects'])
 
     def create_shared_drive(self,name):
+        """Creates a new Shared Drive.
+
+        Parameters:
+            name: string, the name for the Shared Drive
+        Returns:
+            dict, the new Shared Drive name and id.
+        """
         return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
 
     def list_shared_drives(self):
