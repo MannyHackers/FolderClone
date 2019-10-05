@@ -220,7 +220,7 @@ class multifolderclone():
             else:
                 nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "├" + "─" * width + " "
             if folder['name'] not in folders_copied.keys():
-                folder_id = _apicall(
+                folder_id = self._apicall(
                     drive[0].files().create(
                         body={
                             "name": folder["name"],
