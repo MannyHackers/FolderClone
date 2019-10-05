@@ -4,20 +4,19 @@ from google.auth.transport.requests import Request
 from os import mkdir,path
 import json
 
-def get_cred(credentials,token):
-    SCOPES = ['https://www.googleapis.com/auth/drive']
+def get_creds(credentials,token,scopes=['https://www.googleapis.com/auth/drive']):
     creds = None
 
     if path.exists(token):
-        with open(token, 'r') as t:
+        with open(token,'r') as t:
             creds = json_to_cred(t)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file(credentials, SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(credentials,scopes)
             creds = flow.run_local_server(port=0)
-        with open(token, 'w') as t:
+        with open(token,'w') as t:
             json.dump(cred_to_json(creds),token,sort_keys=True,indent=2)
 
     return creds
@@ -31,7 +30,6 @@ def cred_to_json(cred_to_pass):
         'client_id': cred_to_pass.client_id,
         'client_secret': cred_to_pass.client_secret,
     }
-
     return cred_json
 
 def json_to_cred(json_to_pass):
@@ -44,5 +42,4 @@ def json_to_cred(json_to_pass):
         client_id=cred_json['client_id'],
         client_secret=cred_json['client_secret']
     )
-
     return creds

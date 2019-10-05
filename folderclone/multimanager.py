@@ -1,5 +1,3 @@
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from argparse import ArgumentParser
@@ -95,6 +93,25 @@ class multimanager():
         if options.get('max_projects') is not None:
             self.max_projects = int(options['max_projects'])
 
+        projs = None
+        retries = 0
+        proj_id = loads(open(self.credentials,'r').read())['installed']['project_id']
+        while type(projs) is not list:
+            if retries > 2:
+                raise RuntimeError('Could not use Cloud Resource Manager API.')
+            retries += 1
+            try:
+                projs = self.list_projects()
+            except HttpError as e:
+                if loads(e.content.decode('utf-8'))['error']['message'].startswith('Cloud Resource Manager API has not been used in project'):
+                    try:
+                        self.usage_service.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % proj_id).execute()
+                    except Exception as e:
+                        print(e._get_reason())
+                        input('Press Enter to retry.')
+                else:
+                    raise e
+
     def create_shared_drive(self,name):
         """Creates a new Shared Drive.
 
@@ -106,7 +123,7 @@ class multimanager():
         return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
 
     def list_shared_drives(self):
-        return self.drive_service.drives().list().execute(fields='id,name')
+        return self.drive_service.drives().list(fields='drives(id,name)').execute()['drives']
 
     def list_projects(self):
         return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
@@ -185,6 +202,8 @@ class multimanager():
             ))
 
     def enable_services(self,projects,services=['iam','drive']):
+        if type(projects) is not list or type(services) is not list:
+            raise ValueError('Projects and services must both be lists.')
         services = [i + '.googleapis.com' for i in services]
         batch = self.usage_service.new_batch_http_request(callback=self._default_batch_resp)
         for i in projects:
@@ -320,28 +339,6 @@ if __name__ == '__main__':
         max_projects=args.max_projects,
         sleep_time=args.sleep
         )
-
-    # first time setup?
-    projs = None
-    retries = 0
-    proj_id = loads(open(args.credentials,'r').read())['installed']['project_id']
-    while projs == None:
-        if retries > 2:
-            print('Could not use Cloud Resource Manager API.')
-            exit(-1)
-        retries += 1
-        try:
-            projs = mg.list_projects()
-        except HttpError as e:
-            if loads(e.content.decode('utf-8'))['error']['status'] == 'PERMISSION_DENIED':
-                try:
-                    mg.enable_services(proj_id,'cloudresourcemanager')
-                except HttpError as e:
-                    print(e._get_reason())
-                    input('Press Enter to retry.')
-            else:
-                print(e)
-                print('Report this issue on https://github.com/Spazzlo/folderclone/issues')
 
     # quick setup
     try:
