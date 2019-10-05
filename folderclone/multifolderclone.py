@@ -19,6 +19,8 @@ class multifolderclone():
     dtu = 1
     retry = []
     threads = None
+    id_copy_list = None
+    name_copy_list = None
     bad_drives = []
     max_retries = 3
     sleep_time = 1
@@ -40,8 +42,8 @@ class multifolderclone():
     }
 
     def __init__(self,source,dest,**options):
-        """
-        """
+        '''
+        '''
         self.source = source
         self.dest = dest
         if type(dest) is str:
@@ -58,6 +60,10 @@ class multifolderclone():
             self.sleep_time = int(options['sleep_time'])
         if options.get('max_retries') is not None:
             self.max_retries = int(options['max_retries'])
+        if options.get('id_copy_list') is not None:
+            self.id_copy_list = list(options['id_copy_list'])
+        if options.get('name_copy_list') is not None:
+            self.name_copy_list = list(options['name_copy_list'])
 
     def _apicall(self,request):
         resp = None
@@ -71,11 +77,11 @@ class multifolderclone():
                 resp = request.execute()
             except HttpError as error:
                 try:
-                    error_details = json.loads(error.content.decode("utf-8"))
+                    error_details = json.loads(error.content.decode('utf-8'))
                 except json.decoder.JSONDecodeError:
                     time.sleep(self.sleep_time)
                     continue
-                reason = error_details["error"]["errors"][0]["reason"]
+                reason = error_details['error']['errors'][0]['reason']
                 if reason == 'userRateLimitExceeded':
                     return False
                 elif reason == 'storageQuotaExceeded':
@@ -94,50 +100,50 @@ class multifolderclone():
             else:
                 return resp
 
-    def _ls(self,service,parent, searchTerms=""):
+    def _ls(self,service,parent, searchTerms=''):
         files = []
         
         resp = self._apicall(
             service.files().list(
-                q="'%s' in parents%s" % (parent,searchTerms),
+                q='"%s" in parents%s' % (parent,searchTerms),
                 fields='files(md5Checksum,id,name),nextPageToken',
                 pageSize=1000,
                 supportsAllDrives=True,
                 includeItemsFromAllDrives=True
             )
         )
-        files += resp["files"]
+        files += resp['files']
 
-        while "nextPageToken" in resp:
+        while 'nextPageToken' in resp:
             resp = self._apicall(
                 service.files().list(
-                    q="'%s' in parents%s" % (parent,searchTerms),
+                    q='"%s" in parents%s' % (parent,searchTerms),
                     fields='files(md5Checksum,id,name),nextPageToken',
                     pageSize=1000,
                     supportsAllDrives=True,
                     includeItemsFromAllDrives=True,
-                    pageToken=resp["nextPageToken"]
+                    pageToken=resp['nextPageToken']
                 )
             )
-            files += resp["files"]
+            files += resp['files']
         return files
 
     def _lsd(self,service,parent):
         return self._ls(
             service,
             parent,
-            searchTerms=" and mimeType contains 'application/vnd.google-apps.folder'"
+            searchTerms=' and mimeType contains "application/vnd.google-apps.folder"'
         )
 
     def _lsf(self,service,parent):
         return self._ls(
             service,
             parent,
-            searchTerms=" and not mimeType contains 'application/vnd.google-apps.folder'"
+            searchTerms=' and not mimeType contains "application/vnd.google-apps.folder"'
         )
 
     def _copy(self,driv,source,dest):
-        if self._apicall(driv.files().copy(fileId=source, body={"parents": [dest]}, supportsAllDrives=True)) == False:
+        if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
             self.bad_drives.append(driv)
             self.retry.append((source,dest))
         self.threads.release()
@@ -182,6 +188,16 @@ class multifolderclone():
             if dtu > len(drive) - 1:
                 dtu = 1
         self.retry = []
+
+        if self.id_copy_list is not None:
+            for i in list(files_to_copy):
+                if i['id'] not in self.id_copy_list:
+                    files_to_copy.remove(i)
+        if self.name_copy_list is not None:
+            for i in list(files_to_copy):
+                if i['name'] not in self.name_copy_list:
+                    files_to_copy.remove(i)
+
         if len(files_to_copy) > 0:
             for file in files_to_copy:
                 self.threads.acquire()
@@ -216,16 +232,16 @@ class multifolderclone():
         s = 0
         for folder in folders_source:
             if s == fs:
-                nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "└" + "─" * width + " "
+                nstu = pre.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '└' + '─' * width + ' '
             else:
-                nstu = pre.replace("├" + "─" * width + " ", "│" + " " * width + " ").replace("└" + "─" * width + " ", "  " + " " * width) + "├" + "─" * width + " "
+                nstu = pre.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '├' + '─' * width + ' '
             if folder['name'] not in folders_copied.keys():
                 folder_id = self._apicall(
                     drive[0].files().create(
                         body={
-                            "name": folder["name"],
-                            "mimeType": "application/vnd.google-apps.folder",
-                            "parents": [dest]
+                            'name': folder['name'],
+                            'mimeType': 'application/vnd.google-apps.folder',
+                            'parents': [dest]
                         },
                         supportsAllDrives=True
                     )
@@ -235,9 +251,9 @@ class multifolderclone():
             drive = self._rcopy(
                 drive,
                 dtu,
-                folder["id"],
+                folder['id'],
                 folder_id,
-                folder["name"].replace('%', "%%"),
+                folder['name'].replace('%', '%%'),
                 nstu,
                 width
             )
@@ -249,7 +265,7 @@ class multifolderclone():
         if len(accounts) < 2:
             raise ValueError('The path provided (%s) has 1 or less accounts.' % self.path)
 
-        check = build("drive", "v3", credentials=Credentials.from_service_account_file(accounts[0]))
+        check = build('drive', 'v3', credentials=Credentials.from_service_account_file(accounts[0]))
 
         try:
             root_dir = check.files().get(fileId=self.source, supportsAllDrives=True).execute()['name']
@@ -267,13 +283,13 @@ class multifolderclone():
                 else:
                     dest_dict.pop(key)
 
-        print("Creating %d Drive Services" % len(accounts))
+        print('Creating %d Drive Services' % len(accounts))
         drive = []
         for account in accounts:
             credentials = Credentials.from_service_account_file(account, scopes=[
-                "https://www.googleapis.com/auth/drive"
+                'https://www.googleapis.com/auth/drive'
             ])
-            drive.append(build("drive", "v3", credentials=credentials))
+            drive.append(build('drive', 'v3', credentials=credentials))
         if self.thread_count is not None and self.thread_count <= len(drive):
             self.threads = threading.BoundedSemaphore(self.thread_count)
             print('BoundedSemaphore with %d threads' % self.thread_count)
@@ -285,7 +301,7 @@ class multifolderclone():
 
         for i, dest_dir in dest_dict.items():
             print('Copying from %s to %s.' % (root_dir, dest_dir))
-            self._rcopy(drive, 1,self.source, i, root_dir, "", self.width)
+            self._rcopy(drive,1,self.source,i,root_dir,'',self.width)
 
 if __name__ == '__main__':
     parse = ArgumentParser(description='A tool intended to copy large files from one folder to another.')
