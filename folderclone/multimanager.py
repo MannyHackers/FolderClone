@@ -1,24 +1,25 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from argparse import ArgumentParser
+from folderclone._helpers import *
 from base64 import b64decode
 from os.path import exists
 from random import choice
-from os import rename
 from json import loads
 from time import sleep
 from uuid import uuid4
+from os import rename
 from glob import glob
 from sys import exit
-import pickle
 
 class multimanager():
     credentials = 'credentials.json'
-    token = 'token.pickle'
+    token = 'token.json'
     drive_service = None
     cloud_service = None
     usage_service = None
     iam_service = None
+    proj_id = None
     max_projects = 12
     creds = None
     project_create_ops = []
@@ -39,28 +40,15 @@ class multimanager():
             Resource: The service used to interact with the API.
         """
         SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
-        if self.creds == None:
-            if exists(self.token):
-                with open(self.token, 'rb') as t:
-                    self.creds = pickle.load(t)
-            if not self.creds or not self.creds.valid:
-                if self.creds and self.creds.expired and self.creds.refresh_token:
-                    self.creds.refresh(Request())
-                else:
-                    if not exists(self.credentials):
-                        raise FileNotFoundError('No credentials found at %s' % self.credentials)
-                    flow = InstalledAppFlow.from_client_secrets_file(self.credentials, SCOPES)
-                    self.creds = flow.run_local_server(port=0)
-                with open(self.token, 'wb') as t:
-                    pickle.dump(self.creds, t)
-        return build(service, v, credentials=self.creds)
+        self.creds = get_creds(self.credentials,self.token,scopes=SCOPES)
+        return build(service,v,credentials=self.creds)
 
     def __init__(self,**options):
         """Creates a new multimanager object.
 
         Optional Parameters:
             credentials (str): The path for the credentials file. (default credentials.json)
-            token (str): The path for the token file. (default token.pickle)
+            token (str): The path for the token file. (default token.json)
             sleep_time (int): The amound of seconds to sleep between errors. (default 30)
             max_projects (int): Max amount of project allowed. (default 12)
             usage_service: A Service Usage service
@@ -95,9 +83,9 @@ class multimanager():
 
         projs = None
         retries = 0
-        proj_id = loads(open(self.credentials,'r').read())['installed']['project_id']
+        self.proj_id = loads(open(self.credentials,'r').read())['installed']['project_id']
         while type(projs) is not list:
-            if retries > 2:
+            if retries > 5:
                 raise RuntimeError('Could not use Cloud Resource Manager API.')
             retries += 1
             try:
@@ -105,12 +93,20 @@ class multimanager():
             except HttpError as e:
                 if loads(e.content.decode('utf-8'))['error']['message'].startswith('Cloud Resource Manager API has not been used in project'):
                     try:
-                        self.usage_service.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % proj_id).execute()
+                        self.usage_service.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % self.proj_id).execute()
                     except Exception as e:
                         print(e._get_reason())
                         input('Press Enter to retry.')
                 else:
                     raise e
+
+    def _drive_execute(self,to_execute):
+        try:
+            return to_execute.execute()
+        except HttpError as e:
+            if loads(e.content.decode('utf-8'))['error']['message'].startswith('Access Not Configured. Drive API has not been used in project'):
+                self.enable_services([self.proj_id],['drive'])
+                raise RuntimeError('Drive API has been enabled. Please wait a few minutes before trying again.')
 
     def create_shared_drive(self,name):
         """Creates a new Shared Drive.
@@ -120,10 +116,10 @@ class multimanager():
         Returns:
             dict, the new Shared Drive name and id.
         """
-        return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
+        return self._drive_execute(self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name'))
 
     def list_shared_drives(self):
-        return self.drive_service.drives().list(fields='drives(id,name)').execute()['drives']
+        return self._drive_execute(self.drive_service.drives().list(fields='drives(id,name)'))['drives']
 
     def list_projects(self):
         return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
@@ -295,7 +291,7 @@ class multimanager():
 if __name__ == '__main__':
     parse = ArgumentParser(description='A tool to create Google service accounts.')
     parse.add_argument('--path',default='accounts',help='Specify an alternate directory to output the credential files. Default: accounts')
-    parse.add_argument('--token',default='token.pickle',help='Specify the pickle token file path. Default: token.pickle')
+    parse.add_argument('--token',default='token.json',help='Specify the token file path. Default: token.json')
     parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path. Default: credentials.json')
     parse.add_argument('--max-projects',type=int,default=12,help='Max amount of project allowed. Default: 12')
     parse.add_argument('--sleep',default=30,type=int,help='The amound of seconds to sleep between errors. Default: 30')
