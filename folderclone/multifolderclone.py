@@ -102,18 +102,8 @@ class multifolderclone():
 
     def _ls(self,service,parent, searchTerms=''):
         files = []
+        resp = {'nextPageToken':None}
         
-        resp = self._apicall(
-            service.files().list(
-                q='"%s" in parents%s' % (parent,searchTerms),
-                fields='files(md5Checksum,id,name),nextPageToken',
-                pageSize=1000,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True
-            )
-        )
-        files += resp['files']
-
         while 'nextPageToken' in resp:
             resp = self._apicall(
                 service.files().list(
