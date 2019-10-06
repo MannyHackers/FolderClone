@@ -107,6 +107,8 @@ class multimanager():
             if loads(e.content.decode('utf-8'))['error']['message'].startswith('Access Not Configured. Drive API has not been used in project'):
                 self.enable_services([self.proj_id],['drive'])
                 raise RuntimeError('Drive API has been enabled. Please wait a few minutes before trying again.')
+            else:
+                raise e
 
     def create_shared_drive(self,name):
         """Creates a new Shared Drive.
@@ -116,10 +118,21 @@ class multimanager():
         Returns:
             dict, the new Shared Drive name and id.
         """
-        return self._drive_execute(self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name'))
+        try:
+            return self._drive_execute(self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name'))
+        except HttpError as e:
+            if loads(e.content.decode('utf-8'))['error']['message'] == 'The user does not have sufficient permissions for this file.':
+                raise ValueError('User cannot create Shared Drives.')
+            else:
+                raise e
 
     def list_shared_drives(self):
-        return self._drive_execute(self.drive_service.drives().list(fields='drives(id,name)'))['drives']
+        all_drives = []
+        resp = {'nextPageToken':None}
+        while 'nextPageToken' in resp:
+            resp = self._drive_execute(self.drive_service.drives().list(fields='drives(id,name)',pageSize=100,pageToken=resp['nextPageToken']))
+            all_drives += resp['drives']
+        return all_drives
 
     def list_projects(self):
         return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
