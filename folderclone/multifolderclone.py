@@ -20,7 +20,9 @@ class multifolderclone():
     retry = []
     threads = None
     id_whitelist = None
+    id_blacklist = None
     name_whitelist = None
+    name_blacklist = None
     bad_drives = []
     max_retries = 3
     sleep_time = 1
@@ -62,6 +64,10 @@ class multifolderclone():
             self.id_whitelist = list(options['id_whitelist'])
         if options.get('name_whitelist') is not None:
             self.name_whitelist = list(options['name_whitelist'])
+        if options.get('id_blacklist') is not None:
+            self.id_blacklist = list(options['id_blacklist'])
+        if options.get('name_blacklist') is not None:
+            self.name_blacklist = list(options['name_blacklist'])
 
     def _apicall(self,request):
         resp = None
@@ -160,6 +166,8 @@ class multifolderclone():
                 files_to_copy.append(files_source_id[i])
             i += 1
         for i in self.retry:
+            if drive_to_use > len(drive) - 1:
+                drive_to_use = 1
             self.threads.acquire()
             thread = threading.Thread(
                 target=self._copy,
@@ -169,19 +177,22 @@ class multifolderclone():
                     i[1]
                 )
             )
-            thread.start()
             drive_to_use += 1
-            if drive_to_use > len(drive) - 1:
-                drive_to_use = 1
+            thread.start()
         self.retry = []
 
-        if self.id_whitelist is not None:
-            for i in list(files_to_copy):
+        for i in list(files_to_copy):
+            if self.id_whitelist is not None:
                 if i['id'] not in self.id_whitelist:
                     files_to_copy.remove(i)
-        if self.name_whitelist is not None:
-            for i in list(files_to_copy):
+            if self.id_blacklist is not None:
+                if i['id'] in self.id_blacklist:
+                    files_to_copy.remove(i)
+            if self.name_whitelist is not None:
                 if i['name'] not in self.name_whitelist:
+                    files_to_copy.remove(i)
+            if self.name_blacklist is not None:
+                if i['name'] in self.name_blacklist:
                     files_to_copy.remove(i)
 
         if len(files_to_copy) > 0:
@@ -204,13 +215,14 @@ class multifolderclone():
             print(display_line + folder_name + ' | Up to date')
         else:
             print(display_line + folder_name)
+
+
         for i in self.bad_drives:
             if i in drive:
                 drive.remove(i)
         self.bad_drives = []
         if len(drive) == 1:
-            print('Out of SAs.')
-            return
+            raise RuntimeError('Out of SAs.')
 
         for i in folders_dest:
             folders_copied[i['name']] = i['id']
