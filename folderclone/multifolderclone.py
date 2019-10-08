@@ -216,7 +216,6 @@ class multifolderclone():
         else:
             print(display_line + folder_name)
 
-
         for i in self.bad_drives:
             if i in drive:
                 drive.remove(i)
