@@ -17,7 +17,7 @@ def get_creds(credentials,token,scopes=['https://www.googleapis.com/auth/drive']
             flow = InstalledAppFlow.from_client_secrets_file(credentials,scopes)
             creds = flow.run_local_server(port=0)
         with open(token,'w') as t:
-            json.dump(cred_to_json(creds),t,sort_keys=True,indent=2)
+            json.dump(cred_to_json(creds),t,indent=2)
 
     return creds
 

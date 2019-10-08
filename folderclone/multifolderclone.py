@@ -16,11 +16,11 @@ class multifolderclone():
     thread_count = None
     skip_bad_dests = False
 
-    dtu = 1
+    drive_to_use = 1
     retry = []
     threads = None
-    id_copy_list = None
-    name_copy_list = None
+    id_whitelist = None
+    name_whitelist = None
     bad_drives = []
     max_retries = 3
     sleep_time = 1
@@ -42,8 +42,6 @@ class multifolderclone():
     }
 
     def __init__(self,source,dest,**options):
-        '''
-        '''
         self.source = source
         self.dest = dest
         if type(dest) is str:
@@ -60,10 +58,10 @@ class multifolderclone():
             self.sleep_time = int(options['sleep_time'])
         if options.get('max_retries') is not None:
             self.max_retries = int(options['max_retries'])
-        if options.get('id_copy_list') is not None:
-            self.id_copy_list = list(options['id_copy_list'])
-        if options.get('name_copy_list') is not None:
-            self.name_copy_list = list(options['name_copy_list'])
+        if options.get('id_whitelist') is not None:
+            self.id_whitelist = list(options['id_whitelist'])
+        if options.get('name_whitelist') is not None:
+            self.name_whitelist = list(options['name_whitelist'])
 
     def _apicall(self,request):
         resp = None
@@ -103,7 +101,6 @@ class multifolderclone():
     def _ls(self,service,parent, searchTerms=''):
         files = []
         resp = {'nextPageToken':None}
-        
         while 'nextPageToken' in resp:
             resp = self._apicall(
                 service.files().list(
@@ -138,8 +135,7 @@ class multifolderclone():
             self.retry.append((source,dest))
         self.threads.release()
              
-    def _rcopy(self,drive,dtu,source,dest,sname,pre,width):
-        pres = pre
+    def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
         files_source = self._lsf(drive[0],source)
         files_dest = self._lsf(drive[0],dest)
         folders_source = self._lsd(drive[0],source)
@@ -148,7 +144,7 @@ class multifolderclone():
         files_source_id = []
         files_dest_id = []
 
-        fs = len(folders_source) - 1
+        folder_len = len(folders_source) - 1
 
         folders_copied = {}
         for file in files_source:
@@ -168,24 +164,24 @@ class multifolderclone():
             thread = threading.Thread(
                 target=self._copy,
                 args=(
-                    drive[dtu],
+                    drive[drive_to_use],
                     i[0],
                     i[1]
                 )
             )
             thread.start()
-            dtu += 1
-            if dtu > len(drive) - 1:
-                dtu = 1
+            drive_to_use += 1
+            if drive_to_use > len(drive) - 1:
+                drive_to_use = 1
         self.retry = []
 
-        if self.id_copy_list is not None:
+        if self.id_whitelist is not None:
             for i in list(files_to_copy):
-                if i['id'] not in self.id_copy_list:
+                if i['id'] not in self.id_whitelist:
                     files_to_copy.remove(i)
-        if self.name_copy_list is not None:
+        if self.name_whitelist is not None:
             for i in list(files_to_copy):
-                if i['name'] not in self.name_copy_list:
+                if i['name'] not in self.name_whitelist:
                     files_to_copy.remove(i)
 
         if len(files_to_copy) > 0:
@@ -194,20 +190,20 @@ class multifolderclone():
                 thread = threading.Thread(
                     target=self._copy,
                     args=(
-                        drive[dtu],
+                        drive[drive_to_use],
                         file['id'],
                         dest
                     )
                 )
                 thread.start()
-                dtu += 1
-                if dtu > len(drive) - 1:
-                    dtu = 1
-            print(pres + sname + ' | Synced')
+                drive_to_use += 1
+                if drive_to_use > len(drive) - 1:
+                    drive_to_use = 1
+            print(display_line + folder_name + ' | Synced')
         elif len(files_source) > 0 and len(files_source) <= len(files_dest):
-            print(pres + sname + ' | Up to date')
+            print(display_line + folder_name + ' | Up to date')
         else:
-            print(pres + sname)
+            print(display_line + folder_name)
         for i in self.bad_drives:
             if i in drive:
                 drive.remove(i)
@@ -219,12 +215,12 @@ class multifolderclone():
         for i in folders_dest:
             folders_copied[i['name']] = i['id']
         
-        s = 0
+        current_folder = 0
         for folder in folders_source:
-            if s == fs:
-                nstu = pre.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '└' + '─' * width + ' '
+            if current_folder == folder_len:
+                next_display_line = display_line.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '└' + '─' * width + ' '
             else:
-                nstu = pre.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '├' + '─' * width + ' '
+                next_display_line = display_line.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '├' + '─' * width + ' '
             if folder['name'] not in folders_copied.keys():
                 folder_id = self._apicall(
                     drive[0].files().create(
@@ -240,32 +236,32 @@ class multifolderclone():
                 folder_id = folders_copied[folder['name']]
             drive = self._rcopy(
                 drive,
-                dtu,
+                drive_to_use,
                 folder['id'],
                 folder_id,
                 folder['name'].replace('%', '%%'),
-                nstu,
+                next_display_line,
                 width
             )
-            s += 1
+            current_folder += 1
         return drive
 
     def clone(self):
         accounts = glob(self.path + '/*.json')
         if len(accounts) < 2:
-            raise ValueError('The path provided (%s) has 1 or less accounts.' % self.path)
+            raise ValueError('The path provided (%s) has 1 or no accounts.' % self.path)
 
-        check = build('drive', 'v3', credentials=Credentials.from_service_account_file(accounts[0]))
+        check = build('drive','v3',credentials=Credentials.from_service_account_file(accounts[0]))
 
         try:
-            root_dir = check.files().get(fileId=self.source, supportsAllDrives=True).execute()['name']
+            root_dir = check.files().get(fileId=self.source,supportsAllDrives=True).execute()['name']
         except HttpError:
             raise ValueError('Source folder %s cannot be read or is invalid.' % self.source)
 
         dest_dict = {i:'' for i in self.dest}
         for key in list(dest_dict.keys()):
             try:
-                dest_dir = check.files().get(fileId=key, supportsAllDrives=True).execute()['name']
+                dest_dir = check.files().get(fileId=key,supportsAllDrives=True).execute()['name']
                 dest_dict[key] = dest_dir
             except HttpError:
                 if not skip_bad_dests:
@@ -290,7 +286,7 @@ class multifolderclone():
             raise ValueError('More threads than there is service accounts.')
 
         for i, dest_dir in dest_dict.items():
-            print('Copying from %s to %s.' % (root_dir, dest_dir))
+            print('Copying from %s to %s.' % (root_dir,dest_dir))
             self._rcopy(drive,1,self.source,i,root_dir,'',self.width)
 
 if __name__ == '__main__':
@@ -300,8 +296,8 @@ if __name__ == '__main__':
     parse.add_argument('--threads', type=int, default=None,help='Specify a different thread count. Cannot be greater than the amount of service accounts available.')
     parse.add_argument('--skip-bad-dests',default=False,action='store_true',help='Skip any destionations that cannot be read.')
     parsereq = parse.add_argument_group('required arguments')
-    parsereq.add_argument('--source-id', '-s',help='The source ID of the folder to copy.',required=True)
-    parsereq.add_argument('--destination-id', '-d',action='append',help='The destination ID of the folder to copy to.',required=True)
+    parsereq.add_argument('--source-id','--source', '-s',help='The source ID of the folder to copy.',required=True)
+    parsereq.add_argument('--destination-id','--destination', '-d',action='append',help='The destination ID of the folder to copy to.',required=True)
     args = parse.parse_args()
     mfc = multifolderclone(
         source=args.source_id,
