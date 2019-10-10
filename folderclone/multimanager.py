@@ -297,6 +297,10 @@ class multimanager():
 
 # args handler
 def args_handler(mg,args):
+    # default value for services if not set
+    args.services = ['iam','drive'] if args.services is None else args.services
+
+    # print any error
     try:
         if args.command == 'quick-setup':
             if args.amount < 1 and args.amount < 6:
@@ -514,7 +518,6 @@ if __name__ == '__main__':
     quicksetup.add_argument(metavar='Drive ID',dest='drive_id',help='The ID of the Shared Drive to use for folderclone.')
 
     args = parse.parse_args()
-    args.services = ['iam','drive'] if args.services is None else args.services
 
     # If no credentials file, search for one.
     if not exists(args.credentials):
