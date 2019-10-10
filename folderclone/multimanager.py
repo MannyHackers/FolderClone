@@ -1,6 +1,5 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from argparse import ArgumentParser
 from folderclone._helpers import *
 from base64 import b64decode
 from os.path import exists
@@ -8,9 +7,26 @@ from random import choice
 from json import loads
 from time import sleep
 from uuid import uuid4
-from os import rename
+from os import rename,mkdir
 from glob import glob
 from sys import exit
+
+class BatchJob():
+    def __init__(self,service):
+        self.batch = service.new_batch_http_request(callback=self.callback_handler)
+        self.batch_resp = []
+    def add(self,to_add,request_id=None):
+        self.batch.add(to_add,request_id=request_id)
+    def callback_handler(self,rid,resp,exception):
+        response = {'request_id':rid,'exception':None,'response':None}
+        if exception is not None:
+            response['exception'] = exception
+        else:
+            response['response'] = resp
+        self.batch_resp.append(response)
+    def execute(self):
+        self.batch.execute()
+        return self.batch_resp
 
 class multimanager():
     credentials = 'credentials.json'
@@ -27,35 +43,19 @@ class multimanager():
     successful = []
     to_be_removed = []
     sleep_time = 30
+
     def _build_service(self,service,v):
-        """Builds a new service.
+        self.creds = get_creds(
+            self.credentials,
+            self.token,
+            scopes=[
+            'https://www.googleapis.com/auth/drive',
+            'https://www.googleapis.com/auth/cloud-platform',
+            'https://www.googleapis.com/auth/iam'])
 
-        Given api service and version v, builds and returns a new service.
-
-        Parameters:
-            service (str): The API service name.
-            v (str): The API version.
-
-        Returns:
-            Resource: The service used to interact with the API.
-        """
-        SCOPES = ["https://www.googleapis.com/auth/drive","https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/iam"]
-        self.creds = get_creds(self.credentials,self.token,scopes=SCOPES)
         return build(service,v,credentials=self.creds)
 
     def __init__(self,**options):
-        """Creates a new multimanager object.
-
-        Optional Parameters:
-            credentials (str): The path for the credentials file. (default credentials.json)
-            token (str): The path for the token file. (default token.json)
-            sleep_time (int): The amound of seconds to sleep between errors. (default 30)
-            max_projects (int): Max amount of project allowed. (default 12)
-            usage_service: A Service Usage service
-            iam_service: An IAM service.
-            drive_service: A Drive service.
-            cloud_service: A Cloud Resource Manager service.
-        """
         if options.get('credentials') is not None:
             self.credentials = str(options['credentials'])
         if options.get('token') is not None:
@@ -82,44 +82,35 @@ class multimanager():
             self.max_projects = int(options['max_projects'])
 
         projs = None
+        sas = None
+        drives = None
         retries = 0
         self.proj_id = loads(open(self.credentials,'r').read())['installed']['project_id']
-        while type(projs) is not list:
+        while type(projs) is not list and type(sas) is not list and type(drives) is not list:
             if retries > 5:
                 raise RuntimeError('Could not use Cloud Resource Manager API.')
             retries += 1
             try:
                 projs = self.list_projects()
+                sas = self.list_service_accounts(self.proj_id)
+                drives = self.list_shared_drives()
             except HttpError as e:
-                if loads(e.content.decode('utf-8'))['error']['message'].startswith('Cloud Resource Manager API has not been used in project'):
-                    try:
-                        self.usage_service.services().enable(name='projects/%s/services/cloudresourcemanager.googleapis.com' % self.proj_id).execute()
-                    except Exception as e:
-                        print(e._get_reason())
+                if loads(e.content.decode('utf-8'))['error']['message'].endswith('If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.'):
+                    op = self.enable_services([self.proj_id],['drive','iam','cloudresourcemanager'])
+                    err = None
+                    for i in op:
+                        if i['exception'] is not None:
+                            err = i['exception']
+                            break
+                    if err is not None:
+                        print(err._get_reason())
                         input('Press Enter to retry.')
                 else:
                     raise e
 
-    def _drive_execute(self,to_execute):
-        try:
-            return to_execute.execute()
-        except HttpError as e:
-            if loads(e.content.decode('utf-8'))['error']['message'].startswith('Access Not Configured. Drive API has not been used in project'):
-                self.enable_services([self.proj_id],['drive'])
-                raise RuntimeError('Drive API has been enabled. Please wait a few minutes before trying again.')
-            else:
-                raise e
-
     def create_shared_drive(self,name):
-        """Creates a new Shared Drive.
-
-        Parameters:
-            name: string, the name for the Shared Drive
-        Returns:
-            dict, the new Shared Drive name and id.
-        """
         try:
-            return self._drive_execute(self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name'))
+            return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
         except HttpError as e:
             if loads(e.content.decode('utf-8'))['error']['message'] == 'The user does not have sufficient permissions for this file.':
                 raise ValueError('User cannot create Shared Drives.')
@@ -130,7 +121,7 @@ class multimanager():
         all_drives = []
         resp = {'nextPageToken':None}
         while 'nextPageToken' in resp:
-            resp = self._drive_execute(self.drive_service.drives().list(fields='drives(id,name)',pageSize=100,pageToken=resp['nextPageToken']))
+            resp = self.drive_service.drives().list(fields='drives(id,name)',pageSize=100,pageToken=resp['nextPageToken']).execute()
             all_drives += resp['drives']
         return all_drives
 
@@ -138,93 +129,98 @@ class multimanager():
         return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
 
     def list_service_accounts(self,project):
-        resp = self.iam_service.projects().serviceAccounts().list(name='projects/%s' % project,pageSize=100).execute()
+        try:
+            resp = self.iam_service.projects().serviceAccounts().list(name='projects/%s' % project,pageSize=100).execute()
+        except HttpError as e:
+            if loads(e.content.decode('utf-8'))['error']['message'] == 'The caller does not have permission':
+                raise RuntimeError('Could not list Service Accounts in project %s' % project)
         if 'accounts' in resp:
             return resp['accounts']
         return []
 
-    def _generate_id():
+    def _generate_id(self):
         chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
         return 'mg-' + ''.join(choice(chars) for _ in range(26)) + choice(chars[1:])
 
     def create_projects(self,count):
         if count + len(self.list_projects()) > self.max_projects:
             raise ValueError('Too many projects to create. Max Projects: %s' % self.max_projects)
-        batch = self.cloud_service.new_batch_http_request(callback=self._pc_resp)
+        batch = BatchJob(self.cloud_service)
         new_projs = []
         for i in range(count):
             new_proj = self._generate_id()
             new_projs.append(new_proj)
             batch.add(self.cloud_service.projects().create(body={'project_id':new_proj}))
-        batch.execute()
+        project_create_ops = batch.execute()
 
-        for i in self.project_create_ops:
+        for i in project_create_ops:
             while True:
-                resp = self.cloud_service.operations().get(name=i).execute()
+                resp = self.cloud_service.operations().get(name=i['response']['name']).execute()
                 if 'done' in resp and resp['done']:
                     break
                 sleep(3)
         return new_projs
 
-    def _pc_resp(self,id,resp,exception):
-        if exception is not None:
-            print(str(exception))
-        else:
-            for i in resp.values():
-                self.project_create_ops.append(i)
+    def _rate_limit_check(self,batch_resp):
+        should_sleep = False
+        for i in batch_resp:
+            if i['exception'] is not None:
+                should_sleep = True
+                break
+        if should_sleep:
+            sleep(self.sleep_time)
 
     def create_service_accounts(self,project):
         sa_count = len(self.list_service_accounts(project))
         while sa_count != 100:
-            batch = self.iam_service.new_batch_http_request(callback=self._default_batch_resp)
+            batch = BatchJob(self.iam_service)
             for i in range(100 - sa_count):
                 aid = self._generate_id()
                 batch.add(self.iam_service.projects().serviceAccounts().create(name='projects/%s' % project,body={'accountId':aid,'serviceAccount':{'displayName':aid}}))
-            batch.execute()
+            self._rate_limit_check(batch.execute())
             sa_count = len(self.list_service_accounts(project))
 
     def delete_service_accounts(self,project):
-        batch = self.iam_service.new_batch_http_request(callback=_default_batch_resp)
+        batch = BatchJob(self.iam_service)
         for i in self.list_service_accounts(project):
             batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
-        batch.execute()
-
-    def _default_batch_resp(self,id,resp,exception):
-        if exception is not None:
-            if str(exception).startswith('<HttpError 429'):
-                sleep(self.sleep_time/100)
-            elif loads(exception.content.decode('utf-8'))['error']['message'] == 'Request had insufficient authentication scopes.':
-                raise ValueError('Insufficient authentication scopes.')
-            else:
-                print(exception)
-
-    def _batch_keys_resp(self,id,resp,exception):
-        if exception is not None:
-            self.current_key_dump = None
-            sleep(self.sleep_time/100)
-        elif current_key_dump is None:
-            sleep(self.sleep_time/100)
-        else:
-            self.current_key_dump.append((
-                resp['name'][resp['name'].rfind('/'):],
-                b64decode(resp['privateKeyData']).decode('utf-8')
-            ))
+        self._rate_limit_check(batch.execute())
+        sas = self.list_service_accounts(project)
+        sa_count = len(sas)
+        while sa_count != 0:
+            batch = BatchJob(self.iam_service)
+            for i in sas:
+                batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
+            self._rate_limit_check(batch.execute())
+            sas = self.list_service_accounts(project)
+            sa_count = len(sas)
 
     def enable_services(self,projects,services=['iam','drive']):
         if type(projects) is not list or type(services) is not list:
             raise ValueError('Projects and services must both be lists.')
         services = [i + '.googleapis.com' for i in services]
-        batch = self.usage_service.new_batch_http_request(callback=self._default_batch_resp)
+        batch = BatchJob(self.usage_service)
         for i in projects:
             for j in services:
-                batch.add(self.usage_service.services().enable(name='projects/%s/services/%s' % (i,j)))
-        batch.execute()
+                batch.add(self.usage_service.services().enable(name='projects/%s/services/%s' % (i,j)),request_id='%s|%s' % (j,i))
+        enable_ops = batch.execute()
+
+        for i in enable_ops:
+            if i['exception'] is not None:
+                prj_and_serv =i['request_id'].split('|')
+                raise RuntimeError('Could not enable the service %s on the project %s.' % (prj_and_serv[0],prj_and_serv[1]))
+
+        return True
 
     def create_service_account_keys(self,project,path='accounts'):
-        self.current_key_dump = []
-        while self.current_key_dump is None or len(self.current_key_dump) != 100:
-            batch = self.iam_service.new_batch_http_request(callback=self._batch_keys_resp)
-            total_sas = list_service_accounts(project)
+        current_key_dump = []
+        total_sas = self.list_service_accounts(project)
+        try:
+            mkdir(path)
+        except FileExistsError:
+            pass
+        while current_key_dump is None or len(current_key_dump) != 100:
+            batch = BatchJob(self.iam_service)
             for j in total_sas:
                 batch.add(self.iam_service.projects().serviceAccounts().keys().create(
                     name='projects/%s/serviceAccounts/%s' % (project,j['uniqueId']),
@@ -232,48 +228,39 @@ class multimanager():
                         'privateKeyType':'TYPE_GOOGLE_CREDENTIALS_FILE',
                         'keyAlgorithm':'KEY_ALG_RSA_2048'
                         }))
-            batch.execute()
-            if self.current_key_dump is None:
-                self.current_key_dump = []
-            else:
-                for j in self.current_key_dump:
-                    with open('%s/%s.json' % (path,j[0]),'w+') as f:
-                        f.write(j[1])
+            current_key_dump = batch.execute()
 
-    def _share_success(self,id,resp,exception):
-        if exception is None:
-            self.successful.append(resp['emailAddress'])
-        else:
-            print(str(exception))
+            retry = False
+            for i in current_key_dump:
+                if i['exception'] is not None:
+                    retry = True
+                    break
+
+            if not retry:
+                for i in current_key_dump:
+                    with open('%s/%s.json' % (path,i['response']['name'][i['response']['name'].rfind('/'):]),'w+') as f:
+                        f.write(b64decode(i['response']['privateKeyData']).decode('utf-8'))
 
     def add_users(self,drive_id,emails):
-        while len(self.successful) < len(emails):
-            batch = self.drive_service.new_batch_http_request(callback=self._share_success)
+        successful = []
+        while len(successful) < len(emails):
+            batch = BatchJob(self.drive_service)
             for i in emails:
-                if i not in self.successful:
+                if i not in successful:
                     batch.add(self.drive_service.permissions().create(fileId=drive_id, fields='emailAddress', supportsAllDrives=True, body={
-                        "role": "fileOrganizer",
-                        "type": "user",
-                        "emailAddress": i
+                        'role': 'fileOrganizer',
+                        'type': 'user',
+                        'emailAddress': i
                     }))
-            batch.execute()
-
-    def _remove_success(self,id,resp,exception):
-        if exception is not None:
-            exp = str(exception).split('?')[0].split('/')
-            if exp[0].startswith('<HttpError 404'):
-                pass
-            else:
-                self.to_be_removed.append(exp[-1])
-        else:
-            print(str(exception))
+            for i in batch.execute():
+                if i['exception'] is None:
+                    successful.append(i['response']['emailAddress'])
 
     def remove_users(drive_id,emails=None,role=None,prefix=None,suffix=None):
         if emails is None and role is None and prefix is None and suffix is None:
             raise ValueError('You must provide one of three options: role, prefix, suffix')
         all_perms = []
-        rp = self.drive_service.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True).execute()
-        all_perms += rp['permissions']
+        rp = {'nextPageToken':None}
         while 'nextPageToken' in rp:
             rp = self.drive_service.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True,pageToken=rp['nextPageToken']).execute()
             all_perms += rp['permissions']
@@ -282,37 +269,228 @@ class multimanager():
             for i in all_perms:
                 if emails:
                     if i['emailAddress'] in emails:
-                        self.to_be_removed.append(i['id'])
+                        to_be_removed.append(i['id'])
                 elif role:
                     if role == i['role'].lower():
-                        self.to_be_removed.append(i['id'])
+                        to_be_removed.append(i['id'])
                 elif prefix:
                     if i['emailAddress'].split('@')[0].startswith(prefix):
-                        self.to_be_removed.append(i['id'])
+                        to_be_removed.append(i['id'])
                 elif suffix:
                     if i['emailAddress'].split('@')[0].endswith(suffix):
-                        self.to_be_removed.append(i['id'])
-        while len(self.to_be_removed) > 0:
-            # idk why i did this, leaving it here in case its needed later, tbr = [ self.to_be_removed[i:i + 100] for i in range(0, len(self.to_be_removed), 100) ]
-            self.to_be_removed = []
-            # for j in tbr:
-            batch = self.drive_service.new_batch_http_request(callback=self._remove_success)
-            for i in self.to_be_removed:
+                        to_be_removed.append(i['id'])
+        while len(to_be_removed) > 0:
+            batch = BatchJob(self.drive_service)
+            for i in to_be_removed:
                 batch.add(self.drive_service.permissions().delete(fileId=drive_id,permissionId=i,supportsAllDrives=True))
-            batch.execute()
+            to_be_removed = []
+            for i in batch.execute():
+                if i['exception'] is not None:
+                    exp = str(i['exception']).split('?')[0].split('/')
+                    if not exp[0].startswith('<HttpError 404'):
+                        to_be_removed.append(exp[-1])
+
+# args handler
+
+def args_handler(mg,args):
+    try:
+        # list
+        if args.command == 'list':
+
+            # list drives
+            if args.list == 'drives':
+                drives = mg.list_shared_drives()
+                if len(drives) < 1:
+                    print('No Shared Drives found.')
+                else:
+                    print('Shared Drives (%d):' % len(drives))
+                    for i in drives:
+                        print('  %s (ID: %s)' % (i['name'],i['id']))
+
+            # list projects
+            elif args.list == 'projects':
+                projs = mg.list_projects()
+                if len(projs) < 1:
+                    print('No projects found.')
+                else:
+                    print('Projects (%d):' % len(projs))
+                    for i in projs:
+                        print('  %s' % (i))
+
+            # list accounts PROJECTS
+            elif args.list == 'accounts':
+                if len(args.project) == 1 and args.project[0] == 'all':
+                    args.project = mg.list_projects()
+                sas = []
+                for i in args.project:
+                    sas += mg.list_service_accounts(i)
+                if len(sas) < 1:
+                    print('No Service Accounts found.')
+                else:
+                    for i in sas:
+                        print('  %s (%s)' % (i['email'],i['uniqueId']))
+
+        # create
+        elif args.command == 'create':
+
+            # create projects N
+            if args.list == 'projects':
+                if args.amount < 1:
+                    print('multimanager.py create projects: error: the following arguments must be greater than 0: amount')
+                else:
+                    projs = mg.create_projects(args.amount)
+                    print('New Projects (%d):' % len(projs))
+                    for i in projs:
+                        print('  %s' % i)
+
+            # create drive NAME
+            if args.list == 'drive':
+                newsd = mg.create_shared_drive(args.name)
+                print('Shared Drive Name: %s\n  Shared Drive ID: %s' % (newsd['name'],newsd['id']))
+
+            # create accounts PROJECTS
+            if args.list == 'accounts':
+                if len(args.project) == 1 and args.project[0] == 'all':
+                    args.project = mg.list_projects()
+                for i in args.project:
+                    print('Creating Service Accounts in %s' % i)
+                    mg.create_service_accounts(i)
+
+            # create account-keys PROJECTS
+            if args.list == 'account-keys':
+                if len(args.project) == 1 and args.project[0] == 'all':
+                    args.project = mg.list_projects()
+                for i in args.project:
+                    print('Creating Service Accounts Keys in %s' % i)
+                    mg.create_service_account_keys(i,path=args.path)
+
+        # enable-services PROJECTS
+        elif args.command == 'enable-services':
+            if len(args.project) == 1 and args.project[0] == 'all':
+                args.project = mg.list_projects()
+            outptstr = 'Enabling services (%d):\n' % len(args.services)
+            for i in args.services:
+                outptstr += '  %s\n' % i
+            outptstr += 'On projects (%d):\n' % len(args.project)
+            for i in args.project:
+                outptstr += '  %s\n' % i
+            print(outptstr[:-1])
+            mg.enable_services(args.project)
+            print('Services enabled.')
+
+        # delete PROJECTS (deletes accounts from PROJECTS)
+        elif args.command == 'delete':
+            if len(args.project) == 1 and args.project[0] == 'all':
+                args.project = mg.list_projects()
+            for i in args.project:
+                print('Deleting Service Accounts in %s' % i)
+                mg.delete_service_accounts(i)
+
+        # add DRIVE_ID (add users from args.path to the drive)
+        elif args.command == 'add':
+            accounts_to_add = []
+            for i in glob('%s/*.json' % args.path):
+                accounts_to_add.append(loads(open(i,'r').read())['client_email'])
+            if len(accounts_to_add) > 599:
+                print('More than 599 accounts detected. Shared Drives can only hold 600 users max. Split the accounts into smaller folders and specify the path using the --path flag.')
+            else:
+                print('Adding %d users' % len(accounts_to_add))
+                mg.add_users(args.drive_id,accounts_to_add)
+
+        # remove DRIVE_ID (remove users from the drive)
+        elif args.command == 'remove':
+
+            # remove DRIVE_ID pattern ROLE
+            if args.pattern_type == 'role':
+                if args.pattern_type.lower() in ('owner','organizer','fileorganizer','writer','reader','commenter'):
+                    mg.remove_users(args.drive_id,role=args.pattern)
+                else:
+                    pring('Invalid role %s. Choose from (owner,organizer,fileorganizer,writer,reader,commenter)' % args.pattern)
+
+            # remove DRIVE_ID pattern SUFFIX
+            elif args.pattern_type == 'suffix':
+                mg.remove_users(args.drive_id,suffix=args.pattern)
+
+            # remove DRIVE_ID pattern ROLE
+            elif args.pattern_type == 'prefix':
+                mg.remove_users(args.drive_id,prefix=args.pattern)
+    except Exception as e:
+        print(e)
+
 
 if __name__ == '__main__':
-    parse = ArgumentParser(description='A tool to create Google service accounts.')
+    from argparse import ArgumentParser
+    from cmd import Cmd
+
+    # master parser
+    parse = ArgumentParser(description='A multi-purpose manager for Shared Drives and Google Cloud.')
+
+    # opts
+    parse.add_argument('--sleep',default=30,type=int,help='The amound of seconds to sleep between rate limit errors. Default: 30')
     parse.add_argument('--path',default='accounts',help='Specify an alternate directory to output the credential files. Default: accounts')
-    parse.add_argument('--token',default='token.json',help='Specify the token file path. Default: token.json')
-    parse.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path. Default: credentials.json')
     parse.add_argument('--max-projects',type=int,default=12,help='Max amount of project allowed. Default: 12')
-    parse.add_argument('--sleep',default=30,type=int,help='The amound of seconds to sleep between errors. Default: 30')
-    parse.add_argument('--services',nargs='+',default=['iam','drive'],help='Overrides the services to enable. Default: IAM and Drive.')
-    parse.add_argument('--remove',default=None,help='Removes users from a Shared Drive..')
-    parse.add_argument('-d','--drive-id',default=None,type=str,help='The ID of the Shared Drive.')
-    parse.add_argument('--quick-setup',default=None,type=int,help='Create projects, enable services, create service accounts and download keys. ')
+    parse.add_argument('--services',action='append',help='Overrides the services to enable. Default: IAM and Drive.')
+
+    # google auth options
+    auth = parse.add_argument_group('Google Authentication')
+    auth.add_argument('--token',default='token.json',help='Specify the token file path. Default: token.json')
+    auth.add_argument('--credentials',default='credentials.json',help='Specify the credentials file path. Default: credentials.json')
+
+    # command subparsers
+    subparsers = parse.add_subparsers(help='Commands',dest='command',required=True)
+    ls = subparsers.add_parser('list',help='List items in a resource.')
+    create = subparsers.add_parser('create',help='Creates a new resource.')
+    enable = subparsers.add_parser('enable-services',help='Enable services in a project.')
+    delete = subparsers.add_parser('delete',help='Delete a resource.')
+    add = subparsers.add_parser('add',help='Add users to a Shared Drive.')
+    remove = subparsers.add_parser('remove',help='Remove users from a Shared Drive.')
+    interact = subparsers.add_parser('interactive',help='Initiate an interactive Multi Manager instance.')
+
+    # ls
+    lsparsers = ls.add_subparsers(help='List options.',dest='list',required=True)
+    lsprojects = lsparsers.add_parser('projects',help='List projects viewable by the user.')
+    lsdrive = lsparsers.add_parser('drives',help='List Shared Drives viewable by the user.')
+    lsaccounts = lsparsers.add_parser('accounts',help='List Shared Drives viewable by the user.')
+    lsaccounts.add_argument('project',nargs='+',help='List Service Accounts in a project.')
+
+    # create
+    createparse = create.add_subparsers(help='List options.',dest='list',required=True)
+
+    createprojs = createparse.add_parser('projects',help='Create new projects.')
+    createprojs.add_argument('amount',type=int,help='The amount of projects to create.')
+
+    createdrive = createparse.add_parser('drive',help='Create a new Shared Drive.')
+    createdrive.add_argument('name',help='The name of the new Shared Drive.')
+
+    createaccounts = createparse.add_parser('accounts',help='Create Service Accounts in a project.')
+    createaccounts.add_argument('project',nargs='+',help='Project in which to create Service Accounts in.')
+
+    createkeys = createparse.add_parser('account-keys',help='List Shared Drives viewable by the user.')
+    createkeys.add_argument('project',nargs='+',help='Project in which to create Service Account keys in.')
+
+    # remove
+    remove.add_argument(metavar='Drive ID',dest='drive_id',help='The ID of the Shared Drive to remove users from.')
+    remove.add_argument(metavar='pattern',dest='pattern_type',choices=('prefix','suffix','role'),help='Remove users by prefix/suffix/role.')
+    remove.add_argument(metavar='prefix/suffix/role',dest='pattern',help='The prefix/suffix/role of the users you want to remove.')
+
+    # add
+    add.add_argument(metavar='Drive ID',dest='drive_id',help='The ID of the Shared Drive to add users to.')
+
+    # delete
+    deleteparse = delete.add_subparsers(metavar='resource',help='Delete options.',dest='delete',required=True)
+
+    deleteaccounts = deleteparse.add_parser('accounts',help='Delete Service Accounts.')
+    deleteaccounts.add_argument('project',nargs='+',help='The project to delete Service Accounts from.')
+
+    # enable-services
+    enable.add_argument('project',nargs='+',help='The project in which to enable services.')
+
+    # folderclone quick setup
+
     args = parse.parse_args()
+    args.services = ['iam','drive'] if args.services is None else args.services
+    print(args)
+
     # If no credentials file, search for one.
     if not exists(args.credentials):
         options = glob('*.json')
@@ -328,7 +506,7 @@ if __name__ == '__main__':
                 i += 1
             inp = None
             while True:
-                inp = input('> ')
+                inp = input('mm> ')
                 if inp in inp_options:
                     break
             if inp in options:
@@ -345,55 +523,34 @@ if __name__ == '__main__':
     mg = multimanager(
         token=args.token,
         credentials=args.credentials,
-        max_projects=args.max_projects,
-        sleep_time=args.sleep
+        sleep_time=args.sleep,
+        max_projects=args.max_projects
         )
 
-    # quick setup
-    try:
-        if args.remove:
-            assert args.drive_id is not None, 'drive-id is required.'
-            opts = args.remove.split('=')
-            if opts[0] == 'path':
-                accounts_tr = []
-                for i in glob('%s/*.json' % opts[1]):
-                    accounts_tr.append(loads(open(i,'r').read())['client_email'])
-                mg.remove_users(drive_id,emails=accounts_tr)
-            elif opts[0] == 'role':
-                valid_roles = ['owner','organizer','fileorganizer','writer','reader','commenter']
-                valid_levels = ['owner','manager','content manager','contributor','viewer','commenter']
-                if opts[1].lower() in valid_levels:
-                    opts[1] = valid_roles[valid_levels.index(opts[1].lower())]
-                elif opts[1].lower() in valid_roles:
-                    opts[1] = opts[1].lower()
-                else:
-                    print('Invalid role.')
-                    exit(-1)
-                mg.remove_users(drive_id,role=opts[1])
-            elif opts[0] == 'prefix':
-                mg.remove_users(drive_id,prefix=opts[1])
-            elif opts[0] == 'suffix':
-                mg.remove_users(drive_id,suffix=opts[1])
-            else:
-                print('Invalid input.')
+    # interactive
+    if args.command == 'interactive':
+        import readline
+        inp = ['']
+        print('Multi Manager v0.5.0')
+        while inp[0] != 'exit':
+            try:
+                inp = input('mm> ').strip().split()
+            except KeyboardInterrupt:
+                inp = []
+                print()
+            except EOFError:
+                inp = ['exit']
+            if len(inp) < 1:
+                inp = ['']
+            elif inp[0] == 'interactive':
+                print('Already in interactive mode.')
+            elif inp[0] != 'exit':
+                if inp[0] == 'help':
+                    inp[0] = '--help'
+                try:
+                    args_handler(mg,parse.parse_args(inp))
+                except SystemExit as e:
+                    pass
+    else:
+        args_handler(mg,args)
 
-        elif args.quick_setup:
-            assert args.drive_id is not None, 'drive_id is required.'
-            print('Creating %d projects.' % args.quick_setup)
-            projs = mg.create_projects(args.quick_setup)
-            print('Enabling services.')
-            mg.enable_services(projs,args.services)
-            for i in projs:
-                print('%s: Creating service accounts.' % i)
-                mg.create_service_accounts(i)
-                print('%s: Downloading keys.' % i)
-                mg.create_service_account_keys(i,path=args.path)
-            accounts_to_add = []
-            for i in glob('%s/*.json' % args.path):
-                accounts_to_add.append(loads(open(i,'r').read())['client_email'])
-            mg.add_users(args.drive_id,accounts_to_add)
-            print('Done.')
-        else:
-            print('Nothing to do.')
-    except Exception as e:
-        print(e)

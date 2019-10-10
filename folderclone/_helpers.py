@@ -4,6 +4,9 @@ from google.auth.transport.requests import Request
 from os import mkdir,path
 import json
 
+def chunk(list_to_chunk,size):
+    return [ list_to_chunk[i:i + size] for i in range(0, len(list_to_chunk), size) ]
+
 def get_creds(credentials,token,scopes=['https://www.googleapis.com/auth/drive']):
     creds = None
 
