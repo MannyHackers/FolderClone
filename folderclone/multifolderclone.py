@@ -275,7 +275,7 @@ class multifolderclone():
                 dest_dir = check.files().get(fileId=key,supportsAllDrives=True).execute()['name']
                 dest_dict[key] = dest_dir
             except HttpError:
-                if not skip_bad_dests:
+                if not self.skip_bad_dests:
                     raise ValueError('Destination folder %s cannot be read or is invalid.' % key)
                 else:
                     dest_dict.pop(key)
