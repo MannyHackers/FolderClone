@@ -222,14 +222,7 @@ class multimanager():
         for i in projects:
             for j in services:
                 batch.add(self.usage_service.services().enable(name='projects/%s/services/%s' % (i,j)),request_id='%s|%s' % (j,i))
-        enable_ops = batch.execute()
-
-        for i in enable_ops:
-            if i['exception'] is not None:
-                prj_and_serv =i['request_id'].split('|')
-                raise RuntimeError('Could not enable the service %s on the project %s.' % (prj_and_serv[0],prj_and_serv[1]))
-
-        return True
+        return batch.execute()
 
     def delete_service_accounts(self,project):
         batch = BatchJob(self.iam_service)
@@ -560,6 +553,8 @@ if __name__ == '__main__':
         from sys import platform
         if platform != 'win32':
             import readline
+        else:
+            import pyreadline
         inp = ['']
         print('Multi Manager v0.5.0')
         while inp[0] != 'exit':
