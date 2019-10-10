@@ -13,6 +13,7 @@ setuptools.setup(
      url='https://github.com/Spazzlo/folderclone',
      packages=['folderclone'],
      install_requires=[
+        'pyreadline',
         'google_auth_oauthlib',
         'urllib3',
         'httplib2shim',

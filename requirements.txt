@@ -1,7 +1,8 @@
-setuptools==40.8.0
-urllib3==1.24.1
 google_auth_oauthlib==0.4.0
+pyreadline==2.1
 progress==1.5
+urllib3==1.24.1
+setuptools==40.8.0
 httplib2shim==0.0.3
 protobuf==3.10.0
 google_api_python_client==1.7.11
