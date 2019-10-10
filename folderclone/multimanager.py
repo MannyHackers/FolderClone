@@ -555,7 +555,7 @@ if __name__ == '__main__':
     # interactive
     if args.command == 'interactive':
         from sys import platform
-        if platform != 'win32:
+        if platform != 'win32':
             import readline
         inp = ['']
         print('Multi Manager v0.5.0')
