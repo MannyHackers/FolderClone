@@ -320,7 +320,7 @@ if __name__ == '__main__':
     )
     try:
         mfc.clone()
-    except ValueError as e:
-        print(e)
     except KeyboardInterrupt:
         print('Quitting.')
+    except Exception as e:
+        print(e)
