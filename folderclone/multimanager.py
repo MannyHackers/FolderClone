@@ -10,6 +10,7 @@ from uuid import uuid4
 from os import rename,mkdir
 from glob import glob
 from sys import exit
+import socket
 
 class BatchJob():
     def __init__(self,service):
@@ -25,7 +26,10 @@ class BatchJob():
             response['response'] = resp
         self.batch_resp.append(response)
     def execute(self):
-        self.batch.execute()
+        try:
+            self.batch.execute()
+        except socket.error:
+            pass
         return self.batch_resp
 
 class multimanager():
@@ -43,6 +47,19 @@ class multimanager():
     successful = []
     to_be_removed = []
     sleep_time = 30
+
+    def _generate_id(self):
+        chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
+        return 'mg-' + ''.join(choice(chars) for _ in range(26)) + choice(chars[1:])
+
+    def _rate_limit_check(self,batch_resp):
+        should_sleep = False
+        for i in batch_resp:
+            if i['exception'] is not None:
+                should_sleep = True
+                break
+        if should_sleep:
+            sleep(self.sleep_time)
 
     def _build_service(self,service,v):
         self.creds = get_creds(
@@ -108,14 +125,8 @@ class multimanager():
                 else:
                     raise e
 
-    def create_shared_drive(self,name):
-        try:
-            return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
-        except HttpError as e:
-            if loads(e.content.decode('utf-8'))['error']['message'] == 'The user does not have sufficient permissions for this file.':
-                raise ValueError('User cannot create Shared Drives.')
-            else:
-                raise e
+    def list_projects(self):
+        return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
 
     def list_shared_drives(self):
         all_drives = []
@@ -124,9 +135,6 @@ class multimanager():
             resp = self.drive_service.drives().list(fields='drives(id,name)',pageSize=100,pageToken=resp['nextPageToken']).execute()
             all_drives += resp['drives']
         return all_drives
-
-    def list_projects(self):
-        return [i['projectId'] for i in self.cloud_service.projects().list().execute()['projects']]
 
     def list_service_accounts(self,project):
         try:
@@ -137,10 +145,6 @@ class multimanager():
         if 'accounts' in resp:
             return resp['accounts']
         return []
-
-    def _generate_id(self):
-        chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
-        return 'mg-' + ''.join(choice(chars) for _ in range(26)) + choice(chars[1:])
 
     def create_projects(self,count):
         if count + len(self.list_projects()) > self.max_projects:
@@ -161,14 +165,14 @@ class multimanager():
                 sleep(3)
         return new_projs
 
-    def _rate_limit_check(self,batch_resp):
-        should_sleep = False
-        for i in batch_resp:
-            if i['exception'] is not None:
-                should_sleep = True
-                break
-        if should_sleep:
-            sleep(self.sleep_time)
+    def create_shared_drive(self,name):
+        try:
+            return self.drive_service.drives().create(body={'name': name},requestId=str(uuid4()),fields='id,name').execute()
+        except HttpError as e:
+            if loads(e.content.decode('utf-8'))['error']['message'] == 'The user does not have sufficient permissions for this file.':
+                raise ValueError('User cannot create Shared Drives.')
+            else:
+                raise e
 
     def create_service_accounts(self,project):
         sa_count = len(self.list_service_accounts(project))
@@ -179,38 +183,6 @@ class multimanager():
                 batch.add(self.iam_service.projects().serviceAccounts().create(name='projects/%s' % project,body={'accountId':aid,'serviceAccount':{'displayName':aid}}))
             self._rate_limit_check(batch.execute())
             sa_count = len(self.list_service_accounts(project))
-
-    def delete_service_accounts(self,project):
-        batch = BatchJob(self.iam_service)
-        for i in self.list_service_accounts(project):
-            batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
-        self._rate_limit_check(batch.execute())
-        sas = self.list_service_accounts(project)
-        sa_count = len(sas)
-        while sa_count != 0:
-            batch = BatchJob(self.iam_service)
-            for i in sas:
-                batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
-            self._rate_limit_check(batch.execute())
-            sas = self.list_service_accounts(project)
-            sa_count = len(sas)
-
-    def enable_services(self,projects,services=['iam','drive']):
-        if type(projects) is not list or type(services) is not list:
-            raise ValueError('Projects and services must both be lists.')
-        services = [i + '.googleapis.com' for i in services]
-        batch = BatchJob(self.usage_service)
-        for i in projects:
-            for j in services:
-                batch.add(self.usage_service.services().enable(name='projects/%s/services/%s' % (i,j)),request_id='%s|%s' % (j,i))
-        enable_ops = batch.execute()
-
-        for i in enable_ops:
-            if i['exception'] is not None:
-                prj_and_serv =i['request_id'].split('|')
-                raise RuntimeError('Could not enable the service %s on the project %s.' % (prj_and_serv[0],prj_and_serv[1]))
-
-        return True
 
     def create_service_account_keys(self,project,path='accounts'):
         current_key_dump = []
@@ -240,6 +212,38 @@ class multimanager():
                 for i in current_key_dump:
                     with open('%s/%s.json' % (path,i['response']['name'][i['response']['name'].rfind('/'):]),'w+') as f:
                         f.write(b64decode(i['response']['privateKeyData']).decode('utf-8'))
+
+    def enable_services(self,projects,services=['iam','drive']):
+        if type(projects) is not list or type(services) is not list:
+            raise ValueError('Projects and services must both be lists.')
+        services = [i + '.googleapis.com' for i in services]
+        batch = BatchJob(self.usage_service)
+        for i in projects:
+            for j in services:
+                batch.add(self.usage_service.services().enable(name='projects/%s/services/%s' % (i,j)),request_id='%s|%s' % (j,i))
+        enable_ops = batch.execute()
+
+        for i in enable_ops:
+            if i['exception'] is not None:
+                prj_and_serv =i['request_id'].split('|')
+                raise RuntimeError('Could not enable the service %s on the project %s.' % (prj_and_serv[0],prj_and_serv[1]))
+
+        return True
+
+    def delete_service_accounts(self,project):
+        batch = BatchJob(self.iam_service)
+        for i in self.list_service_accounts(project):
+            batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
+        self._rate_limit_check(batch.execute())
+        sas = self.list_service_accounts(project)
+        sa_count = len(sas)
+        while sa_count != 0:
+            batch = BatchJob(self.iam_service)
+            for i in sas:
+                batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
+            self._rate_limit_check(batch.execute())
+            sas = self.list_service_accounts(project)
+            sa_count = len(sas)
 
     def add_users(self,drive_id,emails):
         successful = []
@@ -291,11 +295,31 @@ class multimanager():
                         to_be_removed.append(exp[-1])
 
 # args handler
-
 def args_handler(mg,args):
     try:
+        if args.command == 'quick-setup':
+            if args.amount < 1 and args.amount < 6:
+                print('multimanager.py create projects: error: the following arguments must be greater than 0 and less thatn 6: amount')
+            else:
+                print('Creating %d projects.' % args.amount)
+                projs = mg.create_projects(args.amount)
+                print('Enabling services.')
+                mg.enable_services(projs)
+                for i in projs:
+                    print('Creating Service Accounts in %s' % i)
+                    mg.create_service_accounts(i)
+                    print('Creating Service Account keys in %s' % i)
+                    mg.create_service_account_keys(i,path=args.path)
+                accounts_to_add = []
+                print('Fetching emails.')
+                for i in glob('%s/*.json' % args.path):
+                    accounts_to_add.append(loads(open(i,'r').read())['client_email'])
+                print('Adding %d users' % len(accounts_to_add))
+                mg.add_users(args.drive_id,accounts_to_add)
+                print('Done.')
+
         # list
-        if args.command == 'list':
+        elif args.command == 'list':
 
             # list drives
             if args.list == 'drives':
@@ -417,7 +441,6 @@ def args_handler(mg,args):
     except Exception as e:
         print(e)
 
-
 if __name__ == '__main__':
     from argparse import ArgumentParser
     from cmd import Cmd
@@ -444,6 +467,7 @@ if __name__ == '__main__':
     delete = subparsers.add_parser('delete',help='Delete a resource.')
     add = subparsers.add_parser('add',help='Add users to a Shared Drive.')
     remove = subparsers.add_parser('remove',help='Remove users from a Shared Drive.')
+    quicksetup = subparsers.add_parser('quick-setup',help='Runs a quick setup for folderclone.')
     interact = subparsers.add_parser('interactive',help='Initiate an interactive Multi Manager instance.')
 
     # ls
@@ -486,10 +510,11 @@ if __name__ == '__main__':
     enable.add_argument('project',nargs='+',help='The project in which to enable services.')
 
     # folderclone quick setup
+    quicksetup.add_argument('amount',type=int,help='The amount of projects to create for use with folderclone.')
+    quicksetup.add_argument(metavar='Drive ID',dest='drive_id',help='The ID of the Shared Drive to use for folderclone.')
 
     args = parse.parse_args()
     args.services = ['iam','drive'] if args.services is None else args.services
-    print(args)
 
     # If no credentials file, search for one.
     if not exists(args.credentials):
@@ -553,4 +578,3 @@ if __name__ == '__main__':
                     pass
     else:
         args_handler(mg,args)
-
