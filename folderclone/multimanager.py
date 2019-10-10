@@ -1,6 +1,6 @@
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from folderclone._helpers import *
+from ._helpers import *
 from base64 import b64decode
 from os.path import exists
 from random import choice
