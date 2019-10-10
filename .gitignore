@@ -1,4 +1,8 @@
 */
-!folderclone/
-*.json
-token.pickle
+!folderclone/*.py
+!deprecated/*.py
+*
+!*.py
+!requirements.txt
+!.gitignore
+!*.md
