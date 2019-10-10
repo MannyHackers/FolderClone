@@ -105,12 +105,13 @@ class multimanager():
         self.proj_id = loads(open(self.credentials,'r').read())['installed']['project_id']
         while type(projs) is not list and type(sas) is not list and type(drives) is not list:
             if retries > 5:
-                raise RuntimeError('Could not use Cloud Resource Manager API.')
+                raise RuntimeError('Could not enable required APIs.')
             retries += 1
             try:
                 projs = self.list_projects()
                 sas = self.list_service_accounts(self.proj_id)
                 drives = self.list_shared_drives()
+                self.usage_service.services().get(name='projects/%s/services/serviceusage.googleapis.com' % self.proj_id).execute()
             except HttpError as e:
                 if loads(e.content.decode('utf-8'))['error']['message'].endswith('If you enabled this API recently, wait a few minutes for the action to propagate to our systems and retry.'):
                     op = self.enable_services([self.proj_id],['drive','iam','cloudresourcemanager'])
@@ -443,7 +444,6 @@ def args_handler(mg,args):
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    from cmd import Cmd
 
     # master parser
     parse = ArgumentParser(description='A multi-purpose manager for Shared Drives and Google Cloud.')
@@ -554,7 +554,9 @@ if __name__ == '__main__':
 
     # interactive
     if args.command == 'interactive':
-        import readline
+        from sys import platform
+        if platform != 'win32:
+            import readline
         inp = ['']
         print('Multi Manager v0.5.0')
         while inp[0] != 'exit':
