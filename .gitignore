@@ -1,8 +1,10 @@
-*/
-!folderclone/*.py
-!deprecated/*.py
+*
 *
 !*.py
+!src/*.py
+!src/folderclone/*.py
+!src/folderclonecli/*.py
+!deprecated/*.py
 !requirements.txt
 !.gitignore
 !*.md
