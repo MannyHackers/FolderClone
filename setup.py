@@ -6,10 +6,8 @@ install_requires = [
     'urllib3',
     'httplib2shim',
     'protobuf',
+    'pyreadline',
     'google_api_python_client']
-
-if platform == 'win32':
-    install_requires.append('pyreadline')
 
 with open('README.md', 'r') as fh:
     long_description = fh.read()
@@ -21,7 +19,7 @@ setup(
             'multimanager=folderclonecli.mmparse:main',
             'multifolderclone=folderclonecli.mfcparse:main']
     },
-     version='0.5.0b1',
+     version='0.5.0',
      author='Spazzlo',
      description='A tool to copy large folders to Shared Drives.',
      long_description=long_description,
