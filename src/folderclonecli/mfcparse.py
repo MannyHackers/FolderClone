@@ -7,8 +7,6 @@ def main():
     parse.add_argument('--path', '-p', default='accounts', help='Specify an alternative path to the service accounts.')
     parse.add_argument('--threads', type=int, default=None,help='Specify a different thread count. Cannot be greater than the amount of service accounts available.')
     parse.add_argument('--skip-bad-dests',default=False,action='store_true',help='Skip any destionations that cannot be read.')
-    parse.add_argument('--force-threads',default=False,action='store_true',help='Overrides the thread limit check.')
-    parse.add_argument('--verbose',default=False,action='store_true',help='Verbose output. WARNING: Very verbose.')
     parsereq = parse.add_argument_group('required arguments')
     parsereq.add_argument('--source-id','--source', '-s',help='The source ID of the folder to copy.',required=True)
     parsereq.add_argument('--destination-id','--destination', '-d',action='append',help='The destination ID of the folder to copy to.',required=True)
@@ -19,15 +17,11 @@ def main():
         path=args.path,
         width=args.width,
         thread_count=args.threads,
-        skip_bad_dests=args.skip_bad_dests,
-        override_thread_check=args.force_threads,
-        verbose=args.verbose
+        skip_bad_dests=args.skip_bad_dests
     )
     try:
         mfc.clone()
     except Exception as e:
         print(e)
-        if str(e) == 'More threads than there is service accounts.':
-            print('Use --force-threads to override this check.')
     except KeyboardInterrupt:
         print('Quitting.')
