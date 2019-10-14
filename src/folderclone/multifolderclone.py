@@ -182,7 +182,7 @@ class multifolderclone():
             if files_source[i] not in files_dest:
                 files_to_copy.append(files_source_id[i])
             i += 1
-        self._log('Added %d files to copy list.' % len(files_to_copy)
+        self._log('Added %d files to copy list.' % len(files_to_copy))
         for i in self.retry:
             self._log('Copying failed files (quotad SA)')
             if drive_to_use > len(drive) - 1:
