@@ -289,10 +289,10 @@ class multifolderclone():
                 'https://www.googleapis.com/auth/drive'
             ])
             drive.append(build('drive', 'v3', credentials=credentials))
-        if self.thread_count is not None and self.thread_count <= len(drive) and self.override_thread_check:
+        if self.thread_count is not None and self.thread_count <= len(drive):
             self.threads = threading.BoundedSemaphore(self.thread_count)
             print('BoundedSemaphore with %d threads' % self.thread_count)
-        elif self.thread_count is None:
+        elif self.thread_count is None and self.override_thread_check:
             self.threads = threading.BoundedSemaphore(len(drive))
             print('BoundedSemaphore with %d threads' % len(drive))
         else:
