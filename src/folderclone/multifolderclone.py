@@ -13,6 +13,7 @@ class multifolderclone():
     path = 'accounts'
     width = 2
     thread_count = None
+    override_thread_check = False
     skip_bad_dests = False
 
     drive_to_use = 1
@@ -67,6 +68,8 @@ class multifolderclone():
             self.id_blacklist = list(options['id_blacklist'])
         if options.get('name_blacklist') is not None:
             self.name_blacklist = list(options['name_blacklist'])
+        if options.get('override_thread_check') is not None:
+            self.override_thread_check = bool(options['override_thread_check'])
 
     def _apicall(self,request):
         resp = None
@@ -286,7 +289,7 @@ class multifolderclone():
                 'https://www.googleapis.com/auth/drive'
             ])
             drive.append(build('drive', 'v3', credentials=credentials))
-        if self.thread_count is not None and self.thread_count <= len(drive):
+        if self.thread_count is not None and self.thread_count <= len(drive) and self.override_thread_check:
             self.threads = threading.BoundedSemaphore(self.thread_count)
             print('BoundedSemaphore with %d threads' % self.thread_count)
         elif self.thread_count is None:
