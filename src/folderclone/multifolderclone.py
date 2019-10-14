@@ -26,6 +26,7 @@ class multifolderclone():
     bad_drives = []
     max_retries = 3
     sleep_time = 1
+    verbose = False
 
     error_codes = {
         'dailyLimitExceeded': True,
@@ -70,6 +71,11 @@ class multifolderclone():
             self.name_blacklist = list(options['name_blacklist'])
         if options.get('override_thread_check') is not None:
             self.override_thread_check = bool(options['override_thread_check'])
+        if options.get('verbose') is not None:
+            self.verbose = bool(options['verbose'])
+    def _log(self,s):
+        if self.verbose:
+            print(s)
 
     def _apicall(self,request):
         resp = None
@@ -78,10 +84,12 @@ class multifolderclone():
         while True:
             tries += 1
             if tries > self.max_retries:
+                self._log('Could not copy.')
                 return None
             try:
                 resp = request.execute()
             except HttpError as error:
+                self._log(str(error))
                 try:
                     error_details = json.loads(error.content.decode('utf-8'))
                 except json.decoder.JSONDecodeError:
@@ -138,16 +146,23 @@ class multifolderclone():
         )
 
     def _copy(self,driv,source,dest):
+        self._log('Copying file %s into folder %s' % (source,dest))
         if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
+            self._log('Error: Quotad SA')
             self.bad_drives.append(driv)
             self.retry.append((source,dest))
         self.threads.release()
              
     def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
+        print('%s to %s' % (source,dest))
         files_source = self._lsf(drive[0],source)
         files_dest = self._lsf(drive[0],dest)
         folders_source = self._lsd(drive[0],source)
         folders_dest = self._lsd(drive[0],dest)
+        self._log('Found %d files in source.' % len(files_source))
+        self._log('Found %d folders in source.' % len(folders_source))
+        self._log('Found %d files in dest.' % len(files_dest))
+        self._log('Found %d folders in dest.' % len(folders_dest))
         files_to_copy = []
         files_source_id = []
         files_dest_id = []
@@ -167,7 +182,9 @@ class multifolderclone():
             if files_source[i] not in files_dest:
                 files_to_copy.append(files_source_id[i])
             i += 1
+        self._log('Added %d files to copy list.' % len(files_to_copy)
         for i in self.retry:
+            self._log('Copying failed files (quotad SA)')
             if drive_to_use > len(drive) - 1:
                 drive_to_use = 1
             self.threads.acquire()
@@ -196,7 +213,7 @@ class multifolderclone():
             if self.name_blacklist is not None:
                 if i['name'] in self.name_blacklist:
                     files_to_copy.remove(i)
-
+        self._log('Copying files')
         if len(files_to_copy) > 0:
             for file in files_to_copy:
                 self.threads.acquire()
