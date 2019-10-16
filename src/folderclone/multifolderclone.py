@@ -17,13 +17,14 @@ class multifolderclone():
     skip_bad_dests = False
 
     drive_to_use = 1
-    retry = []
+    files_to_copy = []
     threads = None
     id_whitelist = None
     id_blacklist = None
     name_whitelist = None
     name_blacklist = None
     bad_drives = []
+    google_opts = ['trashed = false']
     max_retries = 3
     sleep_time = 1
     verbose = False
@@ -73,6 +74,8 @@ class multifolderclone():
             self.override_thread_check = bool(options['override_thread_check'])
         if options.get('verbose') is not None:
             self.verbose = bool(options['verbose'])
+        if options.get('google_opts') is not None:
+            google_opts = list(google_opts)
     def _log(self,s):
         if self.verbose:
             print(s)
@@ -114,13 +117,13 @@ class multifolderclone():
             else:
                 return resp
 
-    def _ls(self,service,parent, searchTerms=''):
+    def _ls(self,service,parent, searchTerms=[]):
         files = []
         resp = {'nextPageToken':None}
         while 'nextPageToken' in resp:
             resp = self._apicall(
                 service.files().list(
-                    q='"%s" in parents%s' % (parent,searchTerms),
+                    q=' and '.join(['"%s" in parents' % parent] + self.google_opts + self.searchTermsΩ),
                     fields='files(md5Checksum,id,name),nextPageToken',
                     pageSize=1000,
                     supportsAllDrives=True,
@@ -135,14 +138,14 @@ class multifolderclone():
         return self._ls(
             service,
             parent,
-            searchTerms=' and mimeType contains "application/vnd.google-apps.folder"'
+            searchTerms=['mimeType contains "application/vnd.google-apps.folder"']
         )
 
     def _lsf(self,service,parent):
         return self._ls(
             service,
             parent,
-            searchTerms=' and not mimeType contains "application/vnd.google-apps.folder"'
+            searchTerms=['not mimeType contains "application/vnd.google-apps.folder"']
         )
 
     def _copy(self,driv,source,dest):
@@ -150,7 +153,7 @@ class multifolderclone():
         if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
             self._log('Error: Quotad SA')
             self.bad_drives.append(driv)
-            self.retry.append((source,dest))
+            self.files_to_copy.append((source,dest))
         self.threads.release()
              
     def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
@@ -183,22 +186,6 @@ class multifolderclone():
                 files_to_copy.append(files_source_id[i])
             i += 1
         self._log('Added %d files to copy list.' % len(files_to_copy))
-        for i in self.retry:
-            self._log('Copying failed files (quotad SA)')
-            if drive_to_use > len(drive) - 1:
-                drive_to_use = 1
-            self.threads.acquire()
-            thread = threading.Thread(
-                target=self._copy,
-                args=(
-                    drive[drive_to_use],
-                    i[0],
-                    i[1]
-                )
-            )
-            drive_to_use += 1
-            thread.start()
-        self.retry = []
 
         for i in list(files_to_copy):
             if self.id_whitelist is not None:
@@ -213,34 +200,49 @@ class multifolderclone():
             if self.name_blacklist is not None:
                 if i['name'] in self.name_blacklist:
                     files_to_copy.remove(i)
+
+        self.files_to_copy = [ i['id']:dest for i in files_to_copy ]
+
         self._log('Copying files')
         if len(files_to_copy) > 0:
-            for file in files_to_copy:
-                self.threads.acquire()
-                thread = threading.Thread(
-                    target=self._copy,
-                    args=(
-                        drive[drive_to_use],
-                        file['id'],
-                        dest
+            while len(self.files_to_copy) > 0:
+                files_to_copy = self.files_to_copy
+                self.files_to_copy = []
+                running_threads = []
+
+                # copy
+                for i in files_to_copy:
+                    self.threads.acquire()
+                    thread = threading.Thread(
+                        target=self._copy,
+                        args=(drive[drive_to_use],i[0],i[1])
                     )
-                )
-                thread.start()
-                drive_to_use += 1
-                if drive_to_use > len(drive) - 1:
-                    drive_to_use = 1
+                    running_threads.append(thread)
+                    thread.start()
+                    drive_to_use += 1
+                    if drive_to_use > len(drive) - 1:
+                        drive_to_use = 1
+
+                # join all threads
+                for i in running_threads:
+                    i.join()
+
+                # check for bad drives
+                for i in self.bad_drives:
+                    if i in drive:
+                        drive.remove(i)
+                self.bad_drives = []
+
+                # If there is less than 2 SAs, exit
+                if len(drive) == 1:
+                    raise RuntimeError('Out of SAs.')
+
+            # copy completed
             print(display_line + folder_name + ' | Synced')
         elif len(files_source) > 0 and len(files_source) <= len(files_dest):
             print(display_line + folder_name + ' | Up to date')
         else:
             print(display_line + folder_name)
-
-        for i in self.bad_drives:
-            if i in drive:
-                drive.remove(i)
-        self.bad_drives = []
-        if len(drive) == 1:
-            raise RuntimeError('Out of SAs.')
 
         for i in folders_dest:
             folders_copied[i['name']] = i['id']
