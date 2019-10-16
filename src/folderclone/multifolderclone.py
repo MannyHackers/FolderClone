@@ -14,7 +14,6 @@ class multifolderclone():
     path = 'accounts'
     width = 2
     thread_count = None
-    override_thread_check = False
     skip_bad_dests = False
 
     drive_to_use = 1
@@ -28,7 +27,6 @@ class multifolderclone():
     google_opts = ['trashed = false']
     max_retries = 3
     sleep_time = 1
-    verbose = False
 
     error_codes = {
         'dailyLimitExceeded': True,
@@ -88,12 +86,10 @@ class multifolderclone():
         while True:
             tries += 1
             if tries > self.max_retries:
-                self._log('Could not copy.')
                 return None
             try:
                 resp = request.execute()
             except HttpError as error:
-                self._log(str(error))
                 try:
                     error_details = json.loads(error.content.decode('utf-8'))
                 except json.decoder.JSONDecodeError:
@@ -150,23 +146,16 @@ class multifolderclone():
         )
 
     def _copy(self,driv,source,dest):
-        self._log('Copying file %s into folder %s' % (source,dest))
         if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
-            self._log('Error: Quotad SA')
             self.bad_drives.append(driv)
             self.files_to_copy.append((source,dest))
         self.threads.release()
              
     def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
-        print('%s to %s' % (source,dest))
         files_source = self._lsf(drive[0],source)
         files_dest = self._lsf(drive[0],dest)
         folders_source = self._lsd(drive[0],source)
         folders_dest = self._lsd(drive[0],dest)
-        self._log('Found %d files in source.' % len(files_source))
-        self._log('Found %d folders in source.' % len(folders_source))
-        self._log('Found %d files in dest.' % len(files_dest))
-        self._log('Found %d folders in dest.' % len(folders_dest))
         files_to_copy = []
         files_source_id = []
         files_dest_id = []
@@ -309,7 +298,7 @@ class multifolderclone():
                 'https://www.googleapis.com/auth/drive'
             ])
             drive.append(build('drive', 'v3', credentials=credentials))
-        if self.thread_count is not None and (self.override_thread_check or self.thread_count <= len(drive)):
+        if self.thread_count is not None and self.thread_count <= len(drive):
             self.threads = threading.BoundedSemaphore(self.thread_count)
             print('BoundedSemaphore with %d threads' % self.thread_count)
         elif self.thread_count is None:
