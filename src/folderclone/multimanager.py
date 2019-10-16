@@ -42,10 +42,6 @@ class multimanager():
     proj_id = None
     max_projects = 12
     creds = None
-    project_create_ops = []
-    current_key_dump = []
-    successful = []
-    to_be_removed = []
     sleep_time = 30
 
     def _generate_id(self):
@@ -140,12 +136,14 @@ class multimanager():
     def list_service_accounts(self,project):
         try:
             resp = self.iam_service.projects().serviceAccounts().list(name='projects/%s' % project,pageSize=100).execute()
+            if 'accounts' in resp:
+                return resp['accounts']
+            return []
         except HttpError as e:
             if loads(e.content.decode('utf-8'))['error']['message'] == 'The caller does not have permission':
                 raise RuntimeError('Could not list Service Accounts in project %s' % project)
-        if 'accounts' in resp:
-            return resp['accounts']
-        return []
+            else:
+                raise e
 
     def create_projects(self,count):
         if count + len(self.list_projects()) > self.max_projects:
@@ -254,7 +252,7 @@ class multimanager():
                 if i['exception'] is None:
                     successful.append(i['response']['emailAddress'])
 
-    def remove_users(drive_id,emails=None,role=None,prefix=None,suffix=None):
+    def remove_users(self,drive_id,emails=None,role=None,prefix=None,suffix=None):
         if emails is None and role is None and prefix is None and suffix is None:
             raise ValueError('You must provide one of three options: role, prefix, suffix')
         all_perms = []

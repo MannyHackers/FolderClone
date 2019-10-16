@@ -182,7 +182,7 @@ def main():
     add = subparsers.add_parser('add',help='Add users to a Shared Drive.')
     remove = subparsers.add_parser('remove',help='Remove users from a Shared Drive.')
     quicksetup = subparsers.add_parser('quick-setup',help='Runs a quick setup for folderclone.')
-    interact = subparsers.add_parser('interactive',help='Initiate an interactive Multi Manager instance.')
+    interact = subparsers.add_parser('interactive',help='Initiate Multi Manager in interactive mode.')
 
     # ls
     lsparsers = ls.add_subparsers(help='List options.',dest='list',required=True)
