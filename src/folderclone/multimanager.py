@@ -42,10 +42,6 @@ class multimanager():
     proj_id = None
     max_projects = 12
     creds = None
-    project_create_ops = []
-    current_key_dump = []
-    successful = []
-    to_be_removed = []
     sleep_time = 30
 
     def _generate_id(self):

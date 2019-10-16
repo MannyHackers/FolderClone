@@ -2,6 +2,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.errors import HttpError
 from urllib3.exceptions import ProtocolError
 from googleapiclient.discovery import build
+from google.auth.exceptions import TransportError
 from httplib2shim import patch
 from glob import glob
 import time,threading,json,socket
@@ -111,7 +112,7 @@ class multifolderclone():
                     continue
                 else:
                     return None
-            except (socket.error, ProtocolError):
+            except (socket.error, ProtocolError, TransportError):
                 time.sleep(self.sleep_time)
                 continue
             else:
@@ -201,7 +202,7 @@ class multifolderclone():
                 if i['name'] in self.name_blacklist:
                     files_to_copy.remove(i)
 
-        self.files_to_copy = [ i['id']:dest for i in files_to_copy ]
+        self.files_to_copy = [ (i['id'],dest) for i in files_to_copy ]
 
         self._log('Copying files')
         if len(files_to_copy) > 0:
