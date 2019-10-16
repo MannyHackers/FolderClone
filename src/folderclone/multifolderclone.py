@@ -124,7 +124,7 @@ class multifolderclone():
         while 'nextPageToken' in resp:
             resp = self._apicall(
                 service.files().list(
-                    q=' and '.join(['"%s" in parents' % parent] + self.google_opts + self.searchTerms),
+                    q=' and '.join(['"%s" in parents' % parent] + self.google_opts + searchTerms),
                     fields='files(md5Checksum,id,name),nextPageToken',
                     pageSize=1000,
                     supportsAllDrives=True,
