@@ -27,6 +27,7 @@ class multifolderclone():
     google_opts = ['trashed = false']
     max_retries = 3
     sleep_time = 1
+    dont_recurse = False
 
     error_codes = {
         'dailyLimitExceeded': True,
@@ -74,7 +75,10 @@ class multifolderclone():
         if options.get('verbose') is not None:
             self.verbose = bool(options['verbose'])
         if options.get('google_opts') is not None:
-            google_opts = list(google_opts)
+            self.google_opts = list(options['google_opts'])
+        if options.get('no_recursion') is not None:
+            self.dont_recurse = bool(options['no_recursion'])
+
     def _log(self,s):
         if self.verbose:
             print(s)
@@ -238,6 +242,9 @@ class multifolderclone():
             folders_copied[i['name']] = i['id']
         
         current_folder = 0
+        if self.dont_recurse:
+            return drive
+
         for folder in folders_source:
             if current_folder == folder_len:
                 next_display_line = display_line.replace('├' + '─' * width + ' ', '│' + ' ' * width + ' ').replace('└' + '─' * width + ' ', '  ' + ' ' * width) + '└' + '─' * width + ' '
