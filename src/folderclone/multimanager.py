@@ -253,6 +253,7 @@ class multimanager():
                     successful.append(i['response']['emailAddress'])
 
     def remove_users(self,drive_id,emails=None,role=None,prefix=None,suffix=None):
+        to_be_removed = []
         if emails is None and role is None and prefix is None and suffix is None:
             raise ValueError('You must provide one of three options: role, prefix, suffix')
         all_perms = []
