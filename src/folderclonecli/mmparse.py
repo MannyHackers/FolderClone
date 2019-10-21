@@ -144,7 +144,7 @@ def args_handler(mg,args):
                 if args.pattern_type.lower() in ('owner','organizer','fileorganizer','writer','reader','commenter'):
                     mg.remove_users(args.drive_id,role=args.pattern)
                 else:
-                    pring('Invalid role %s. Choose from (owner,organizer,fileorganizer,writer,reader,commenter)' % args.pattern)
+                    print('Invalid role %s. Choose from (owner,organizer,fileorganizer,writer,reader,commenter)' % args.pattern)
 
             # remove DRIVE_ID pattern SUFFIX
             elif args.pattern_type == 'suffix':
