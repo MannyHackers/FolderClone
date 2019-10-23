@@ -141,17 +141,20 @@ def args_handler(mg,args):
 
             # remove DRIVE_ID pattern ROLE
             if args.pattern_type == 'role':
-                if args.pattern_type.lower() in ('owner','organizer','fileorganizer','writer','reader','commenter'):
+                if args.pattern.lower() in ('owner','organizer','fileorganizer','writer','reader','commenter'):
+                    print('Removing accounts')
                     mg.remove_users(args.drive_id,role=args.pattern)
                 else:
-                    pring('Invalid role %s. Choose from (owner,organizer,fileorganizer,writer,reader,commenter)' % args.pattern)
+                    print('Invalid role %s. Choose from (owner,organizer,fileorganizer,writer,reader,commenter)' % args.pattern)
 
             # remove DRIVE_ID pattern SUFFIX
             elif args.pattern_type == 'suffix':
+                print('Removing accounts')
                 mg.remove_users(args.drive_id,suffix=args.pattern)
 
             # remove DRIVE_ID pattern ROLE
             elif args.pattern_type == 'prefix':
+                print('Removing accounts')
                 mg.remove_users(args.drive_id,prefix=args.pattern)
     except Exception as e:
         print(e)
