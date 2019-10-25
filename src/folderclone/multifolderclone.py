@@ -29,6 +29,7 @@ class multifolderclone():
     verbose = False
     max_retries = 3
     sleep_time = 1
+
     statistics = {
         'folders': 0,
         'files': 0,
@@ -50,7 +51,8 @@ class multifolderclone():
         'badRequest': False,
         'invalidSharingRequest': False,
         'authError': False,
-        'notFound': False
+        'notFound': False,
+        'failedPrecondition': True
     }
 
     def __init__(self,source,dest,**options):
@@ -112,7 +114,7 @@ class multifolderclone():
                     time.sleep(self.sleep_time)
                     continue
                 reason = error_details['error']['errors'][0]['reason']
-                self._add_error_stats(reason)
+                # self._add_error_stats(reason)
                 if reason == 'userRateLimitExceeded':
                     return False
                 elif reason == 'storageQuotaExceeded':
@@ -127,7 +129,7 @@ class multifolderclone():
                     return None
             except (socket.error,ProtocolError,TransportError) as e:
                 reason = str(e)
-                self._add_error_stats(reason)
+                # self._add_error_stats(reason)
                 time.sleep(self.sleep_time)
                 continue
             else:

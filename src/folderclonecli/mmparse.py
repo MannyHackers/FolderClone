@@ -157,7 +157,7 @@ def args_handler(mg,args):
                 print('Removing accounts')
                 mg.remove_users(args.drive_id,prefix=args.pattern)
     except Exception as e:
-        print(e)
+        raise e
 
 def main():
     from folderclone.multimanager import multimanager
