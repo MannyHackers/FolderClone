@@ -25,9 +25,19 @@ class multifolderclone():
     name_blacklist = None
     bad_drives = []
     google_opts = ['trashed = false']
+    override_thread_check = False
+    verbose = False
     max_retries = 3
     sleep_time = 1
     dont_recurse = False
+
+    statistics = {
+        'folders': 0,
+        'files': 0,
+        'total_accounts': 0,
+        'quotad_accounts': 0,
+        'errors': {},
+    }
 
     error_codes = {
         'dailyLimitExceeded': True,
@@ -42,7 +52,8 @@ class multifolderclone():
         'badRequest': False,
         'invalidSharingRequest': False,
         'authError': False,
-        'notFound': False
+        'notFound': False,
+        'failedPrecondition': True
     }
 
     def __init__(self,source,dest,**options):
@@ -75,9 +86,15 @@ class multifolderclone():
         if options.get('verbose') is not None:
             self.verbose = bool(options['verbose'])
         if options.get('google_opts') is not None:
-            self.google_opts = list(options['google_opts'])
+            google_opts = list(google_opts)
         if options.get('no_recursion') is not None:
             self.dont_recurse = bool(options['no_recursion'])
+            
+    def _add_error_stats(self,reason):
+        if reason in self.statistics['errors']:
+            self.statistics['errors'][reason] += 1
+        else:
+            self.statistics['errors'][reason] = 1
 
     def _log(self,s):
         if self.verbose:
@@ -100,6 +117,7 @@ class multifolderclone():
                     time.sleep(self.sleep_time)
                     continue
                 reason = error_details['error']['errors'][0]['reason']
+                # self._add_error_stats(reason)
                 if reason == 'userRateLimitExceeded':
                     return False
                 elif reason == 'storageQuotaExceeded':
@@ -112,7 +130,9 @@ class multifolderclone():
                     continue
                 else:
                     return None
-            except (socket.error, ProtocolError, TransportError):
+            except (socket.error,ProtocolError,TransportError) as e:
+                reason = str(e)
+                # self._add_error_stats(reason)
                 time.sleep(self.sleep_time)
                 continue
             else:
@@ -150,12 +170,15 @@ class multifolderclone():
         )
 
     def _copy(self,driv,source,dest):
+        self._log('Copying file %s into folder %s' % (source,dest))
         if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
+            self._log('Error: Quotad SA')
             self.bad_drives.append(driv)
             self.files_to_copy.append((source,dest))
         self.threads.release()
              
     def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
+        self._log('%s to %s' % (source,dest))
         files_source = self._lsf(drive[0],source)
         files_dest = self._lsf(drive[0],dest)
         folders_source = self._lsd(drive[0],source)
@@ -163,8 +186,12 @@ class multifolderclone():
         files_to_copy = []
         files_source_id = []
         files_dest_id = []
-
         folder_len = len(folders_source) - 1
+
+        self._log('Found %d files in source.' % len(files_source))
+        self._log('Found %d folders in source.' % len(folders_source))
+        self._log('Found %d files in dest.' % len(files_dest))
+        self._log('Found %d folders in dest.' % len(folders_dest))
 
         folders_copied = {}
         for file in files_source:
@@ -179,8 +206,8 @@ class multifolderclone():
             if files_source[i] not in files_dest:
                 files_to_copy.append(files_source_id[i])
             i += 1
-        self._log('Added %d files to copy list.' % len(files_to_copy))
 
+        self._log('Checking whitelist and blacklist')
         for i in list(files_to_copy):
             if self.id_whitelist is not None:
                 if i['id'] not in self.id_whitelist:
@@ -194,6 +221,8 @@ class multifolderclone():
             if self.name_blacklist is not None:
                 if i['name'] in self.name_blacklist:
                     files_to_copy.remove(i)
+
+        self._log('Added %d files to copy list.' % len(files_to_copy))
 
         self.files_to_copy = [ (i['id'],dest) for i in files_to_copy ]
 
@@ -293,7 +322,7 @@ class multifolderclone():
                 dest_dir = check.files().get(fileId=key,supportsAllDrives=True).execute()['name']
                 dest_dict[key] = dest_dir
             except HttpError:
-                if not skip_bad_dests:
+                if not self.skip_bad_dests:
                     raise ValueError('Destination folder %s cannot be read or is invalid.' % key)
                 else:
                     dest_dict.pop(key)

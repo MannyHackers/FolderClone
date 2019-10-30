@@ -44,9 +44,13 @@ class multimanager():
     creds = None
     sleep_time = 30
 
-    def _generate_id(self):
+    def _generate_id(self,prefix=None,p=None):
         chars = '-abcdefghijklmnopqrstuvwxyz1234567890'
-        return 'mg-' + ''.join(choice(chars) for _ in range(26)) + choice(chars[1:])
+        if prefix is None:
+            prefix = 'mm-'
+        if p is None:
+            p = 29 - len(prefix)
+        return prefix + ''.join(choice(chars) for _ in range(p)) + choice(chars[1:])
 
     def _rate_limit_check(self,batch_resp):
         should_sleep = False
@@ -117,7 +121,10 @@ class multimanager():
                             err = i['exception']
                             break
                     if err is not None:
-                        print(err._get_reason())
+                        err_msg = err._get_reason()
+                        from webbrowser import open_new_tab
+                        open_new_tab(err_msg[err_msg.find('visiting')+9:err_msg.find('then')-1])
+                        print(err_msg)
                         input('Press Enter to retry.')
                 else:
                     raise e
@@ -173,42 +180,37 @@ class multimanager():
             else:
                 raise e
 
-    def create_service_accounts(self,project):
+    def create_service_accounts(self,project,prefix=None,p=None):
         sa_count = len(self.list_service_accounts(project))
         while sa_count != 100:
             batch = BatchJob(self.iam_service)
             for i in range(100 - sa_count):
-                aid = self._generate_id()
-                batch.add(self.iam_service.projects().serviceAccounts().create(name='projects/%s' % project,body={'accountId':aid,'serviceAccount':{'displayName':aid}}))
+                aid = self._generate_id(prefix=prefix,p=p)
+                batch.add(self.iam_service.projects().serviceAccounts().create(name='projects/%s' % project,fields='',body={'accountId':aid,'serviceAccount':{'displayName':aid}}))
             self._rate_limit_check(batch.execute())
             sa_count = len(self.list_service_accounts(project))
 
     def create_service_account_keys(self,project,path='accounts'):
         current_key_dump = []
-        total_sas = self.list_service_accounts(project)
+        total_sas = [i['uniqueId'] for i in self.list_service_accounts(project)]
         try:
             mkdir(path)
         except FileExistsError:
             pass
-        while current_key_dump is None or len(current_key_dump) != 100:
+        while len(total_sas) != 0:
             batch = BatchJob(self.iam_service)
             for j in total_sas:
                 batch.add(self.iam_service.projects().serviceAccounts().keys().create(
-                    name='projects/%s/serviceAccounts/%s' % (project,j['uniqueId']),
+                    name='projects/%s/serviceAccounts/%s' % (project,j),
                     body={
                         'privateKeyType':'TYPE_GOOGLE_CREDENTIALS_FILE',
                         'keyAlgorithm':'KEY_ALG_RSA_2048'
-                        }))
+                        }),request_id=j)
             current_key_dump = batch.execute()
 
-            retry = False
             for i in current_key_dump:
-                if i['exception'] is not None:
-                    retry = True
-                    break
-
-            if not retry:
-                for i in current_key_dump:
+                if i['exception'] is None:
+                    total_sas.remove(i['request_id'])
                     with open('%s/%s.json' % (path,i['response']['name'][i['response']['name'].rfind('/'):]),'w+') as f:
                         f.write(b64decode(i['response']['privateKeyData']).decode('utf-8'))
 
@@ -223,10 +225,6 @@ class multimanager():
         return batch.execute()
 
     def delete_service_accounts(self,project):
-        batch = BatchJob(self.iam_service)
-        for i in self.list_service_accounts(project):
-            batch.add(self.iam_service.projects().serviceAccounts().delete(name=i['name']))
-        self._rate_limit_check(batch.execute())
         sas = self.list_service_accounts(project)
         sa_count = len(sas)
         while sa_count != 0:
@@ -238,19 +236,23 @@ class multimanager():
             sa_count = len(sas)
 
     def add_users(self,drive_id,emails):
-        successful = []
-        while len(successful) < len(emails):
-            batch = BatchJob(self.drive_service)
-            for i in emails:
-                if i not in successful:
+        while len(emails) > 0:
+            resp = []
+            for spl in [emails[i:i + 100] for i in range(0, len(emails), 100)]:
+                batch = BatchJob(self.drive_service)
+                for i in spl:
                     batch.add(self.drive_service.permissions().create(fileId=drive_id, fields='emailAddress', supportsAllDrives=True, body={
                         'role': 'fileOrganizer',
                         'type': 'user',
                         'emailAddress': i
-                    }))
-            for i in batch.execute():
-                if i['exception'] is None:
-                    successful.append(i['response']['emailAddress'])
+                    }),i)
+                resp += batch.execute()
+            emails = []
+            for i in resp:
+                if i['exception'] is not None:
+                    emails.append(i['request_id'])
+                else:
+                    sleep(self.sleep_time/len(resp))
 
     def remove_users(self,drive_id,emails=None,role=None,prefix=None,suffix=None):
         to_be_removed = []
@@ -262,27 +264,34 @@ class multimanager():
             rp = self.drive_service.permissions().list(fileId=drive_id,pageSize=100,fields='nextPageToken,permissions(id,emailAddress,role)',supportsAllDrives=True,pageToken=rp['nextPageToken']).execute()
             all_perms += rp['permissions']
 
-        else:
-            for i in all_perms:
-                if emails:
-                    if i['emailAddress'] in emails:
-                        to_be_removed.append(i['id'])
-                elif role:
-                    if role == i['role'].lower():
-                        to_be_removed.append(i['id'])
-                elif prefix:
-                    if i['emailAddress'].split('@')[0].startswith(prefix):
-                        to_be_removed.append(i['id'])
-                elif suffix:
-                    if i['emailAddress'].split('@')[0].endswith(suffix):
-                        to_be_removed.append(i['id'])
+        to_be_removed = []
+        for i in all_perms:
+            if emails:
+                if i['emailAddress'] in emails:
+                    to_be_removed.append(i['id'])
+            elif role:
+                if role == i['role'].lower():
+                    to_be_removed.append(i['id'])
+            elif prefix:
+                if i['emailAddress'].split('@')[0].startswith(prefix):
+                    to_be_removed.append(i['id'])
+            elif suffix:
+                if i['emailAddress'].split('@')[0].endswith(suffix):
+                    to_be_removed.append(i['id'])
+        to_be_removed = list(set(to_be_removed))
+
         while len(to_be_removed) > 0:
-            batch = BatchJob(self.drive_service)
-            for i in to_be_removed:
-                batch.add(self.drive_service.permissions().delete(fileId=drive_id,permissionId=i,supportsAllDrives=True))
+            resp = []
+            for spl in [to_be_removed[i:i + 100] for i in range(0, len(to_be_removed), 100)]:
+                batch = BatchJob(self.drive_service)
+                for i in spl:
+                    batch.add(self.drive_service.permissions().delete(fileId=drive_id,permissionId=i,supportsAllDrives=True),i)
+                resp += batch.execute()
             to_be_removed = []
-            for i in batch.execute():
+            for i in resp:
                 if i['exception'] is not None:
-                    exp = str(i['exception']).split('?')[0].split('/')
-                    if not exp[0].startswith('<HttpError 404'):
-                        to_be_removed.append(exp[-1])
+                    if not str(i['exception']).startswith('<HttpError 404'):
+                        to_be_removed.append(i['request_id'])
+                    else:
+                        sleep(self.sleep_time/len(resp))
+            to_be_removed = list(set(to_be_removed))
