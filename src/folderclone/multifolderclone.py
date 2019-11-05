@@ -23,6 +23,7 @@ class multifolderclone():
     id_blacklist = None
     name_whitelist = None
     name_blacklist = None
+    share_publicly = False
     bad_drives = []
     google_opts = ['trashed = false']
     override_thread_check = False
@@ -89,6 +90,8 @@ class multifolderclone():
             google_opts = list(google_opts)
         if options.get('no_recursion') is not None:
             self.dont_recurse = bool(options['no_recursion'])
+        if options.get('share_publicly') is not None:
+            self.share_publicly = bool(options['share_publicly'])
             
     def _add_error_stats(self,reason):
         if reason in self.statistics['errors']:
@@ -171,10 +174,13 @@ class multifolderclone():
 
     def _copy(self,driv,source,dest):
         self._log('Copying file %s into folder %s' % (source,dest))
-        if self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True)) == False:
+        resp = self._apicall(driv.files().copy(fileId=source, body={'parents': [dest]}, supportsAllDrives=True))
+        if not resp:
             self._log('Error: Quotad SA')
             self.bad_drives.append(driv)
             self.files_to_copy.append((source,dest))
+        elif self.share_publicly:
+            self._apicall(driv.permissions().create(fileId=resp['id'],body={'role':'reader','type':'anyone'},supportsAllDrives=True))
         self.threads.release()
              
     def _rcopy(self,drive,drive_to_use,source,dest,folder_name,display_line,width):
