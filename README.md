@@ -54,7 +54,7 @@ multifoldeclone is the tool that will do all the cloning for you. It is the simp
 
     multifolderclone -s SOURCE_FOLDER_ID -d DESTINATION_FOLDER_ID
 
-Where `SOURCE_FOLDER_ID` is the ID of the folder you'll want to copy, and `DESTINATION_FOLDER_ID` is the ID of the folder you are copying to. This could the ID of the Shared Drive, or a folder inside the Shared Drive.
+Where `SOURCE_FOLDER_ID` is the ID of the folder you'll want to copy (Make sure the source folder is accessible to the service accounts by either making the folder public or sharing the folder with the service accounts you are using to copy with), and `DESTINATION_FOLDER_ID` is the ID of the folder you are copying to. This could be the ID of the Shared Drive, or a folder inside the Shared Drive.
 
 This will automatically start cloning the folder!
 And that's it! You did it!
