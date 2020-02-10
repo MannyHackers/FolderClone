@@ -87,7 +87,7 @@ class multifolderclone():
         if options.get('verbose') is not None:
             self.verbose = bool(options['verbose'])
         if options.get('google_opts') is not None:
-            google_opts = list(google_opts)
+            google_opts = list(options['google_opts'])
         if options.get('no_recursion') is not None:
             self.dont_recurse = bool(options['no_recursion'])
         if options.get('share_publicly') is not None:
