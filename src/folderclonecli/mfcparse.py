@@ -33,7 +33,7 @@ def main():
         print(e)
         if str(e) == 'More threads than there is service accounts.':
             print('Use --force-threads to override this check.')
-        if args.verbose:
+        else:
             raise e
     except KeyboardInterrupt:
         print('Quitting.')
