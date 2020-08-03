@@ -46,6 +46,10 @@ This will automatically;
 - add them to the Shared Drive
 - and download their credentials into a new folder `accounts`
 
+## To Remove Service Account From TeamDrive
+
+    remove SHARED_DRIVE_ID prefix mm
+
 You are now ready to go to the next step.
 
 ## multifolderclone
