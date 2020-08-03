@@ -1,4 +1,4 @@
-# folderclone - A project that allows you copy large folders to Shared Drives.
+# Folderclone - A project that allows you copy large folders to Shared Drives. ![Hits](https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https://github.com/MannyHackers/FolderClone)
 
 
 ## Installation
