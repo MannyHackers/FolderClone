@@ -62,3 +62,5 @@ Where `SOURCE_FOLDER_ID` is the ID of the folder you'll want to copy (Make sure 
 
 This will automatically start cloning the folder!
 And that's it! You did it!
+
+[![Top Langs](https://github-readme-stats.vercel.app/api/top-langs/?username=MannyHackers&layout=compact)](https://github.com/MannyHackers/FolderClone)
